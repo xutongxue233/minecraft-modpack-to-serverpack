@@ -131,6 +131,7 @@ async function installVanilla(options: PrepareServerCoreOptions): Promise<void> 
 }
 
 async function installFabric(options: PrepareServerCoreOptions): Promise<void> {
+  await assertCompatibleJava(options.core);
   const fetchImpl = options.fetchImpl ?? fetch;
   const installerVersions = asArray(await fetchJson(fetchImpl, "https://meta.fabricmc.net/v2/versions/installer")).map(asRecord);
   const installerVersion = asString(installerVersions.find((item) => item.stable === true)?.version ?? installerVersions[0]?.version);
@@ -152,6 +153,7 @@ async function installFabric(options: PrepareServerCoreOptions): Promise<void> {
 }
 
 async function installQuilt(options: PrepareServerCoreOptions): Promise<void> {
+  await assertCompatibleJava(options.core);
   const fetchImpl = options.fetchImpl ?? fetch;
   const metadata = await fetchText(fetchImpl, "https://maven.quiltmc.org/repository/release/org/quiltmc/quilt-installer/maven-metadata.xml");
   const installerVersion = /<release>([^<]+)<\/release>/.exec(metadata)?.[1] ?? /<latest>([^<]+)<\/latest>/.exec(metadata)?.[1];
@@ -175,6 +177,7 @@ async function installQuilt(options: PrepareServerCoreOptions): Promise<void> {
 }
 
 async function installForge(options: PrepareServerCoreOptions): Promise<void> {
+  await assertCompatibleJava(options.core);
   const forgeVersion = normalizeMinecraftPrefixedVersion(options.core.minecraftVersion!, options.core.loaderVersion!);
   const installerPath = path.join(options.outputDir, ".installer", `forge-${forgeVersion}-installer.jar`);
   const installerUrl = `https://maven.minecraftforge.net/net/minecraftforge/forge/${forgeVersion}/forge-${forgeVersion}-installer.jar`;
@@ -183,6 +186,7 @@ async function installForge(options: PrepareServerCoreOptions): Promise<void> {
 }
 
 async function installNeoForge(options: PrepareServerCoreOptions): Promise<void> {
+  await assertCompatibleJava(options.core);
   const minecraftVersion = options.core.minecraftVersion!;
   const loaderVersion = options.core.loaderVersion!;
   const legacy = loaderVersion.startsWith(`${minecraftVersion}-`) || minecraftVersion === "1.20.1";
@@ -216,20 +220,97 @@ async function runJavaInstaller(options: PrepareServerCoreOptions, installerPath
   options.onProgress?.({ current: 1, total, label: "运行服务端安装器" });
   options.onLog?.(`正在运行服务端安装器：${path.basename(installerPath)}`);
 
-  try {
-    await execFileAsync("java", ["-jar", installerPath, ...args], {
-      cwd: options.outputDir,
-      timeout: (options.timeoutSeconds ?? 120) * 1000 * 10,
-      windowsHide: true
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw appError("E_SERVER_CORE_INSTALL_FAILED", `服务端安装器执行失败：${message}`, {
-      suggestion: "请确认本机已安装兼容 Java，或取消“直接下载核心”后在服务器环境运行 install-server 脚本。"
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      await execFileAsync("java", ["-jar", installerPath, ...args], {
+        cwd: options.outputDir,
+        timeout: (options.timeoutSeconds ?? 120) * 1000 * 10,
+        maxBuffer: 64 * 1024 * 1024,
+        windowsHide: true
+      });
+      options.onProgress?.({ current: total, total, label: "服务端核心安装完成", percent: 100 });
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt < 2) {
+        options.onLog?.("服务端安装器执行失败，正在重试一次。");
+      }
+    }
+  }
+
+  throw appError("E_SERVER_CORE_INSTALL_FAILED", `服务端安装器执行失败：${formatExecError(lastError)}`, {
+    suggestion: "请确认本机已安装兼容 Java，或取消“直接下载核心”后在服务器环境运行 install-server 脚本。"
+  });
+}
+
+async function assertCompatibleJava(core: ServerCorePlan): Promise<void> {
+  const detected = await detectJavaMajor();
+  if (detected === null) {
+    throw appError("E_SERVER_CORE_INSTALL_FAILED", "未检测到可用的 java 命令，无法直接安装服务端核心。", {
+      suggestion: "请安装兼容 Java，或取消“直接下载核心”后在服务器环境运行 install-server 脚本。"
     });
   }
 
-  options.onProgress?.({ current: total, total, label: "服务端核心安装完成", percent: 100 });
+  if (detected < core.javaMajor) {
+    throw appError(
+      "E_SERVER_CORE_INSTALL_FAILED",
+      `当前 java 是 Java ${detected}，${core.type} ${core.minecraftVersion ?? ""} 需要 Java ${core.javaMajor} 或更高版本。`,
+      {
+        suggestion: "请把 PATH 中的 java 切换到兼容版本，或取消“直接下载核心”后在服务器环境运行 install-server 脚本。"
+      }
+    );
+  }
+}
+
+async function detectJavaMajor(): Promise<number | null> {
+  try {
+    const result = await execFileAsync("java", ["-version"], {
+      timeout: 10_000,
+      windowsHide: true
+    });
+    return parseJavaMajor(`${result.stdout}\n${result.stderr}`);
+  } catch (error) {
+    const maybeOutput = error as { stdout?: unknown; stderr?: unknown };
+    const output = `${typeof maybeOutput.stdout === "string" ? maybeOutput.stdout : ""}\n${typeof maybeOutput.stderr === "string" ? maybeOutput.stderr : ""}`;
+    return parseJavaMajor(output);
+  }
+}
+
+function parseJavaMajor(output: string): number | null {
+  const match = /version "(?<version>[^"]+)"/.exec(output) ?? /openjdk (?<version>\d+(?:\.\d+)?)/i.exec(output);
+  const version = match?.groups?.version;
+  if (!version) {
+    return null;
+  }
+
+  const parts = version.split(".").map((part) => Number.parseInt(part, 10));
+  const first = parts[0];
+  const second = parts[1];
+  if (first === undefined || !Number.isFinite(first)) {
+    return null;
+  }
+
+  if (first === 1 && second !== undefined && Number.isFinite(second)) {
+    return second;
+  }
+
+  return first;
+}
+
+function formatExecError(error: unknown): string {
+  const baseMessage = error instanceof Error ? error.message : String(error);
+  const maybeOutput = error as { stdout?: unknown; stderr?: unknown };
+  const output = [maybeOutput.stdout, maybeOutput.stderr]
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .join("\n")
+    .trim();
+
+  if (!output) {
+    return baseMessage;
+  }
+
+  return `${baseMessage}\n${output.slice(-4000)}`;
 }
 
 async function downloadFile(url: string, destination: string, options: DownloadFileOptions): Promise<void> {
