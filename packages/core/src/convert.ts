@@ -14,6 +14,8 @@ import { type DownloadOptions, type DownloadResult, downloadFileToCache } from "
 import { enrichAnalysisWithPlatformMetadata } from "./metadata/platform-metadata";
 import { decideMods } from "./mod-analysis/decisions";
 import { inferModNameFromFile, scanDownloadedJarMetadata, type JarModMetadata } from "./mod-analysis/jar-metadata";
+import { generateServerpack, type ServerpackGenerationResult } from "./serverpack/serverpack";
+import { createServerpackZip } from "./serverpack/zip-output";
 
 type ReportDownloadStatus = ConversionReport["files"][number]["downloadStatus"];
 
@@ -42,15 +44,12 @@ export async function runConversion(
   });
 
   const outputDir = path.join(request.outputDir, `${sanitizePathSegment(analysis.metadata.name)}-serverpack`);
+  const zipPath = request.settings?.outputZip ? `${outputDir}.zip` : undefined;
   const reportPath = path.join(outputDir, "conversion-report.json");
   const readmePath = path.join(outputDir, "README.md");
   const cacheDir =
     request.settings?.cacheDir ?? options.cacheDir ?? path.join(request.outputDir, ".mcsp-cache", "downloads");
   const warnings = [...analysis.warnings];
-
-  if (request.settings?.outputZip) {
-    warnings.push("zip 输出尚未接入当前转换任务，已先生成服务端目录和转换报告。");
-  }
 
   await fs.mkdir(outputDir, { recursive: true });
 
@@ -111,6 +110,17 @@ export async function runConversion(
     unknownPolicy: request.settings?.unknownPolicy ?? "manual-review",
     metadataByFile: jarMetadataByFile
   });
+
+  emit({ type: "phase", jobId, phase: "packaging", message: "正在生成服务端目录、脚本和 overrides" });
+  const serverpack = await generateServerpack({
+    inputPath: request.inputPath,
+    outputDir,
+    analysis,
+    decisions,
+    downloadResultsByFile
+  });
+  warnings.push(...serverpack.warnings);
+
   const report = buildConversionReport({
     request,
     analysis,
@@ -118,6 +128,8 @@ export async function runConversion(
     downloadResultsByFile,
     downloadErrorsByFile,
     jarMetadataByFile,
+    serverpack,
+    ...(zipPath === undefined ? {} : { zipPath }),
     warnings,
     now: options.now ?? (() => new Date())
   });
@@ -126,11 +138,17 @@ export async function runConversion(
   await fs.writeFile(reportPath, JSON.stringify(report, null, 2), "utf8");
   await fs.writeFile(readmePath, renderReadme(report), "utf8");
 
-  emit({ type: "completed", jobId, outputDir, reportPath });
+  if (zipPath) {
+    emit({ type: "phase", jobId, phase: "packaging", message: "正在打包服务端 zip" });
+    await createServerpackZip(outputDir, zipPath);
+  }
+
+  emit({ type: "completed", jobId, outputDir, reportPath, ...(zipPath === undefined ? {} : { zipPath }) });
   return {
     outputDir,
     reportPath,
     readmePath,
+    ...(zipPath === undefined ? {} : { zipPath }),
     report
   };
 }
@@ -180,6 +198,8 @@ function buildConversionReport({
   downloadResultsByFile,
   downloadErrorsByFile,
   jarMetadataByFile,
+  serverpack,
+  zipPath,
   warnings,
   now
 }: {
@@ -189,6 +209,8 @@ function buildConversionReport({
   downloadResultsByFile: Map<ModFileDescriptor, DownloadResult>;
   downloadErrorsByFile: Map<ModFileDescriptor, string>;
   jarMetadataByFile: Map<ModFileDescriptor, JarModMetadata>;
+  serverpack: ServerpackGenerationResult;
+  zipPath?: string;
   warnings: string[];
   now: () => Date;
 }): ConversionReport {
@@ -266,6 +288,22 @@ function buildConversionReport({
       excludedFiles,
       manualReviewFiles
     },
+    serverpack: {
+      core: {
+        type: serverpack.core.type,
+        ...(serverpack.core.minecraftVersion === undefined ? {} : { minecraftVersion: serverpack.core.minecraftVersion }),
+        ...(serverpack.core.loaderVersion === undefined ? {} : { loaderVersion: serverpack.core.loaderVersion }),
+        javaMajor: serverpack.core.javaMajor,
+        notes: serverpack.core.notes
+      },
+      writtenModFiles: serverpack.writtenModFiles,
+      skippedModFiles: serverpack.skippedModFiles,
+      mergedOverrideFiles: serverpack.mergedOverrideFiles,
+      installScripts: serverpack.installScripts,
+      startScripts: serverpack.startScripts,
+      supportFiles: serverpack.supportFiles,
+      ...(zipPath === undefined ? {} : { zipPath })
+    },
     warnings,
     errors: []
   };
@@ -295,10 +333,22 @@ function renderReadme(report: ConversionReport): string {
     `- 缺少下载地址：${report.summary.missingUrlFiles}`,
     `- 下载失败：${report.summary.failedDownloadFiles}`,
     `- 需要人工复核：${report.summary.manualReviewFiles}`,
+    `- 已写入 mods：${report.serverpack.writtenModFiles}`,
+    `- 已合并 overrides：${report.serverpack.mergedOverrideFiles}`,
+    "",
+    "## 服务端核心",
+    "",
+    `- 核心：${report.serverpack.core.type}`,
+    `- 推荐 Java：${report.serverpack.core.javaMajor}`,
+    ...report.serverpack.core.notes.map((line) => `- ${line}`),
     "",
     "## 部署提示",
     "",
-    "- 当前版本已生成转换报告，完整 mods 输出、overrides 合并和启动脚本会在后续阶段接入。",
+    "- 首次部署时运行 `install-server.ps1` 或 `install-server.bat` 下载并安装对应服务端核心。",
+    "- Linux/macOS 可尝试运行 `bash install-server.sh`，脚本依赖 `curl`、`python3` 和 `java`。",
+    "- 安装完成后阅读并接受 Minecraft EULA，把 `eula.txt` 中的 `eula=false` 改为 `eula=true`。",
+    "- 启动服务端请运行 `start.ps1`、`start.bat` 或 `start.sh`。",
+    "- 内存参数在 `user_jvm_args.txt` 中调整，默认 `-Xms1G`、`-Xmx4G`。",
     "- Minecraft EULA 必须由服主自行确认，本工具不会自动设置 eula=true。",
     "- 若报告中存在 manual-review 或 missing-url，请先处理后再生成最终服务端包。",
     ""

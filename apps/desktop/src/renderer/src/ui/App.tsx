@@ -55,7 +55,11 @@ export function App() {
   const [jobPhase, setJobPhase] = useState<ConversionPhase>("idle");
   const [jobMessage, setJobMessage] = useState("等待任务");
   const [jobProgress, setJobProgress] = useState<{ current: number; total: number } | null>(null);
-  const [conversionOutput, setConversionOutput] = useState<{ outputDir: string; reportPath: string } | null>(null);
+  const [conversionOutput, setConversionOutput] = useState<{
+    outputDir: string;
+    reportPath: string;
+    zipPath?: string;
+  } | null>(null);
   const conversionJobIdRef = useRef<string | null>(null);
   const conversionPendingRef = useRef(false);
 
@@ -107,8 +111,12 @@ export function App() {
         conversionJobIdRef.current = null;
         conversionPendingRef.current = false;
         setJobPhase("completed");
-        setJobMessage("初版报告已生成");
-        setConversionOutput({ outputDir: event.outputDir, reportPath: event.reportPath });
+        setJobMessage(event.zipPath ? "服务端包和 zip 已生成" : "服务端包已生成");
+        setConversionOutput({
+          outputDir: event.outputDir,
+          reportPath: event.reportPath,
+          ...(event.zipPath === undefined ? {} : { zipPath: event.zipPath })
+        });
         setActiveStep("output");
         return;
       }
@@ -562,6 +570,12 @@ export function App() {
                         <FileText size={15} />
                         打开报告
                       </button>
+                      {conversionOutput.zipPath && (
+                        <button type="button" onClick={() => void window.serverpack.openPath(conversionOutput.zipPath!)}>
+                          <FileArchive size={15} />
+                          打开 zip
+                        </button>
+                      )}
                     </>
                   )}
                 </div>

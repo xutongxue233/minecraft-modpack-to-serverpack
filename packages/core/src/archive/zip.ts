@@ -23,6 +23,7 @@ export interface ExtractZipOptions {
   prefixes?: string[];
   stripPrefix?: string;
   limits?: Partial<ArchiveLimits>;
+  shouldExtract?: (relativePath: string, entryName: string) => boolean;
   onFile?: (file: ExtractedZipFile) => void;
 }
 
@@ -156,6 +157,10 @@ export async function extractZipEntries(
 
       const outputRelativePath = stripPrefix && isWithinPrefix(fileName, stripPrefix) ? fileName.slice(stripPrefix.length) : fileName;
       if (!outputRelativePath) {
+        continue;
+      }
+
+      if (options.shouldExtract && !options.shouldExtract(outputRelativePath, fileName)) {
         continue;
       }
 

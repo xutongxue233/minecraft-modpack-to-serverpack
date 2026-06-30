@@ -16,10 +16,13 @@ Keywords: Minecraft serverpack generator, Minecraft modpack converter, CurseForg
 - Produces a conversion report with file decisions, download status, hashes, warnings, and manual review items.
 - Keeps generating the first report even when individual downloads fail, marking those files as `failed`.
 - Shows a scrollable Mod list preview with full JAR file names and versions.
+- Generates a serverpack directory with selected `mods/`, server-safe overrides, `server-core.json`, EULA placeholder, JVM args, install scripts, and start scripts.
+- Optionally writes a distributable serverpack `.zip` next to the generated directory.
+- Selects the server core from pack metadata: Vanilla, Fabric, Quilt, Forge, or NeoForge, including Java version guidance.
 
 ## Current Status
 
-This project is in early MVP development. It already focuses on parsing, metadata enrichment, reporting, and desktop workflow. Full serverpack output, server loader installation scripts, overrides merge rules, and release packaging workflows will continue to improve.
+This project is in early MVP development. It now covers parsing, metadata enrichment, downloads, server-side filtering, initial serverpack directory generation, optional zip output, reports, and the desktop workflow. Richer packwiz remote metadata support, user review workflows, and release packaging automation will continue to improve.
 
 ## Supported Modpack Formats
 
@@ -118,9 +121,8 @@ pnpm dist:win
 
 ## Roadmap
 
-- Generate final serverpack directories with selected `mods/`.
-- Merge `overrides/` and `server-overrides/` with configurable rules.
-- Add loader server installation support for Fabric, Quilt, Forge, and NeoForge.
+- Improve `overrides/` and `server-overrides/` merge rules with user-editable filters.
+- Harden loader server installation scripts with more compatibility checks.
 - Add user-editable client-only and server-only rule sets.
 - Add GitHub Release automation for Windows installers and portable builds.
 - Improve packwiz remote metadata and hash handling.

@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import yazl from "yazl";
+import { listZipEntries } from "./archive/zip";
 import { runConversion } from "./convert";
 
 describe("runConversion", () => {
@@ -48,7 +49,11 @@ describe("runConversion", () => {
           }
         ]
       }),
-      "overrides/config/example.toml": "enabled = true"
+      "overrides/config/example.toml": "enabled = false",
+      "server-overrides/config/example.toml": "enabled = true",
+      "overrides/options.txt": "gamma:1.0",
+      "overrides/mods/local-client.jar": "not reviewed",
+      "client-overrides/config/client-only.toml": "client = true"
     });
 
     const result = await runConversion(
@@ -57,7 +62,8 @@ describe("runConversion", () => {
         outputDir,
         settings: {
           cacheDir,
-          unknownPolicy: "manual-review"
+          unknownPolicy: "manual-review",
+          outputZip: true
         }
       },
       {
@@ -85,8 +91,46 @@ describe("runConversion", () => {
       modId: "servermod",
       metadataSource: "fabric.mod.json"
     });
+    expect(result.report.serverpack).toMatchObject({
+      writtenModFiles: 1,
+      skippedModFiles: 1,
+      mergedOverrideFiles: 2,
+      core: {
+        type: "fabric",
+        minecraftVersion: "1.20.1",
+        loaderVersion: "0.15.11",
+        javaMajor: 17
+      }
+    });
+    await expect(fs.readFile(path.join(result.outputDir, "mods", "server.jar"))).resolves.toEqual(payload);
+    await expect(fs.readFile(path.join(result.outputDir, "config", "example.toml"), "utf8")).resolves.toBe(
+      "enabled = true"
+    );
+    await expect(fs.access(path.join(result.outputDir, "options.txt"))).rejects.toThrow();
+    await expect(fs.access(path.join(result.outputDir, "mods", "local-client.jar"))).rejects.toThrow();
+    await expect(fs.access(path.join(result.outputDir, "install-server.ps1"))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(result.outputDir, "install-server.bat"))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(result.outputDir, "start.ps1"))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(result.outputDir, "start.bat"))).resolves.toBeUndefined();
+    await expect(fs.readFile(path.join(result.outputDir, "eula.txt"), "utf8")).resolves.toContain("eula=false");
+    await expect(fs.readFile(path.join(result.outputDir, "server-core.json"), "utf8")).resolves.toContain(
+      '"type": "fabric"'
+    );
+    expect(result.zipPath).toBe(`${result.outputDir}.zip`);
+    await expect(fs.access(result.zipPath!)).resolves.toBeUndefined();
+    await expect(listZipEntries(result.zipPath!)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ fileName: "mods/server.jar" }),
+        expect.objectContaining({ fileName: "install-server.ps1" }),
+        expect.objectContaining({ fileName: "start.bat" }),
+        expect.objectContaining({ fileName: "conversion-report.json" })
+      ])
+    );
     await expect(fs.readFile(result.reportPath, "utf8")).resolves.toContain('"schemaVersion": 1');
+    await expect(fs.readFile(result.reportPath, "utf8")).resolves.toContain('"serverpack"');
+    await expect(fs.readFile(result.reportPath, "utf8")).resolves.toContain('"zipPath"');
     await expect(fs.readFile(result.readmePath, "utf8")).resolves.toContain("Minecraft: 1.20.1");
+    await expect(fs.readFile(result.readmePath, "utf8")).resolves.toContain("install-server.ps1");
     expect(events).toContain("analyzing");
     expect(events).toContain("downloading");
     expect(events).toContain("completed");
@@ -136,6 +180,8 @@ describe("runConversion", () => {
       fileName: "missing.jar",
       downloadStatus: "failed"
     });
+    await expect(fs.access(path.join(result.outputDir, "mods", "missing.jar"))).rejects.toThrow();
+    await expect(fs.access(path.join(result.outputDir, "start.ps1"))).resolves.toBeUndefined();
     await expect(fs.readFile(result.reportPath, "utf8")).resolves.toContain('"downloadStatus": "failed"');
   });
 });

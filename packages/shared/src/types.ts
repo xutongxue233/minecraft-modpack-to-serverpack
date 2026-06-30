@@ -114,6 +114,22 @@ export interface ConversionReport {
     excludedFiles: number;
     manualReviewFiles: number;
   };
+  serverpack: {
+    core: {
+      type: LoaderType;
+      minecraftVersion?: string;
+      loaderVersion?: string;
+      javaMajor: 8 | 16 | 17 | 21;
+      notes: string[];
+    };
+    writtenModFiles: number;
+    skippedModFiles: number;
+    mergedOverrideFiles: number;
+    installScripts: string[];
+    startScripts: string[];
+    supportFiles: string[];
+    zipPath?: string;
+  };
   warnings: string[];
   errors: AppError[];
 }
@@ -122,6 +138,7 @@ export interface ConversionResult {
   outputDir: string;
   reportPath: string;
   readmePath: string;
+  zipPath?: string;
   report: ConversionReport;
 }
 
