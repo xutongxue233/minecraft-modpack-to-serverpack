@@ -3,6 +3,7 @@ import path from "node:path";
 import type { AnalyzeResult, ModDecision, ModFileDescriptor } from "@mcsp/shared";
 import { extractZipEntries } from "../archive/zip";
 import type { DownloadResult } from "../download/download";
+import type { ServerCoreInstallResult } from "./core-installer";
 import { selectServerCore, type ServerCorePlan } from "./server-core";
 
 export interface ServerpackGenerationResult {
@@ -13,6 +14,7 @@ export interface ServerpackGenerationResult {
   installScripts: string[];
   startScripts: string[];
   supportFiles: string[];
+  coreInstall: ServerCoreInstallResult;
   warnings: string[];
 }
 
@@ -22,6 +24,8 @@ export interface GenerateServerpackOptions {
   analysis: AnalyzeResult;
   decisions: ModDecision[];
   downloadResultsByFile: Map<ModFileDescriptor, DownloadResult>;
+  core?: ServerCorePlan;
+  coreInstall: ServerCoreInstallResult;
 }
 
 const installScripts = ["install-server.ps1", "install-server.bat", "install-server.sh"] as const;
@@ -30,8 +34,9 @@ const supportFiles = ["server-core.json", "user_jvm_args.txt", "eula.txt", "serv
 
 export async function generateServerpack(options: GenerateServerpackOptions): Promise<ServerpackGenerationResult> {
   const warnings: string[] = [];
-  const core = selectServerCore(options.analysis.metadata, { hasMods: options.analysis.files.length > 0 });
+  const core = options.core ?? selectServerCore(options.analysis.metadata, { hasMods: options.analysis.files.length > 0 });
   warnings.push(...core.warnings);
+  warnings.push(...options.coreInstall.warnings);
 
   const writtenModFiles = await writeIncludedMods({
     outputDir: options.outputDir,
@@ -61,6 +66,7 @@ export async function generateServerpack(options: GenerateServerpackOptions): Pr
     installScripts: [...installScripts],
     startScripts: [...startScripts],
     supportFiles: [...supportFiles],
+    coreInstall: options.coreInstall,
     warnings
   };
 }

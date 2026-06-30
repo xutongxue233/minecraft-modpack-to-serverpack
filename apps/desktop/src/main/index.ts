@@ -34,6 +34,7 @@ const defaultSettings: ConversionSettings = {
   maxFileCount: 20_000,
   unknownPolicy: "manual-review",
   outputMode: "package-only",
+  downloadServerCore: false,
   outputZip: false,
   theme: "system",
   curseForgeApiKeyConfigured: false
@@ -223,6 +224,7 @@ function withRuntimeConversionSettings(request: ConversionRequest, settings: Con
       downloadTimeoutSeconds: request.settings?.downloadTimeoutSeconds ?? settings.downloadTimeoutSeconds,
       downloadRetry: request.settings?.downloadRetry ?? settings.downloadRetry,
       unknownPolicy: request.settings?.unknownPolicy ?? settings.unknownPolicy,
+      downloadServerCore: request.settings?.downloadServerCore ?? settings.downloadServerCore,
       outputZip: request.settings?.outputZip ?? settings.outputZip
     }
   };

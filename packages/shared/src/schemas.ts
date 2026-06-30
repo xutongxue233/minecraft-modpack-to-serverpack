@@ -14,6 +14,7 @@ export const ConversionRequestSchema = z.object({
       downloadTimeoutSeconds: z.number().int().min(5).max(600).optional(),
       downloadRetry: z.number().int().min(0).max(10).optional(),
       unknownPolicy: z.enum(["manual-review", "include", "exclude"]).optional(),
+      downloadServerCore: z.boolean().optional(),
       outputZip: z.boolean().optional()
     })
     .optional()
@@ -33,6 +34,7 @@ export const UpdateSettingsRequestSchema = z.object({
   maxFileCount: z.number().int().positive().optional(),
   unknownPolicy: z.enum(["manual-review", "include", "exclude"]).optional(),
   outputMode: z.enum(["package-only", "installable-server"]).optional(),
+  downloadServerCore: z.boolean().optional(),
   outputZip: z.boolean().optional(),
   theme: z.enum(["system", "light", "dark"]).optional(),
   curseForgeApiKey: z.string().nullable().optional()

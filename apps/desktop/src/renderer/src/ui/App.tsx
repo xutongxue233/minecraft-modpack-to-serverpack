@@ -20,7 +20,14 @@ import {
   Upload,
   X
 } from "lucide-react";
-import type { AnalyzeResult, ConversionPhase, ConversionSettings, InputSelection, ModFileDescriptor } from "@mcsp/shared";
+import type {
+  AnalyzeResult,
+  ConversionPhase,
+  ConversionSettings,
+  InputSelection,
+  JobProgressGroup,
+  ModFileDescriptor
+} from "@mcsp/shared";
 
 type StepKey = "input" | "analyze" | "review" | "output";
 
@@ -36,6 +43,21 @@ const sourceName: Record<string, string> = {
   curseforge: "CurseForge",
   packwiz: "packwiz",
   instance: "实例目录"
+};
+
+interface ProgressSnapshot {
+  current: number;
+  total: number;
+  label?: string;
+  percent?: number;
+  receivedBytes?: number;
+  totalBytes?: number;
+}
+
+const progressGroupLabel: Record<JobProgressGroup, string> = {
+  mods: "Mod 下载",
+  core: "核心下载",
+  package: "打包"
 };
 
 export function App() {
@@ -54,7 +76,7 @@ export function App() {
   const [settingsMessage, setSettingsMessage] = useState<string | null>(null);
   const [jobPhase, setJobPhase] = useState<ConversionPhase>("idle");
   const [jobMessage, setJobMessage] = useState("等待任务");
-  const [jobProgress, setJobProgress] = useState<{ current: number; total: number } | null>(null);
+  const [jobProgressGroups, setJobProgressGroups] = useState<Partial<Record<JobProgressGroup, ProgressSnapshot>>>({});
   const [conversionOutput, setConversionOutput] = useState<{
     outputDir: string;
     reportPath: string;
@@ -101,7 +123,18 @@ export function App() {
       }
 
       if (event.type === "progress") {
-        setJobProgress({ current: event.current, total: event.total });
+        const group = event.group ?? "mods";
+        setJobProgressGroups((current) => ({
+          ...current,
+          [group]: {
+            current: event.current,
+            total: event.total,
+            ...(event.label === undefined ? {} : { label: event.label }),
+            ...(event.percent === undefined ? {} : { percent: event.percent }),
+            ...(event.receivedBytes === undefined ? {} : { receivedBytes: event.receivedBytes }),
+            ...(event.totalBytes === undefined ? {} : { totalBytes: event.totalBytes })
+          }
+        }));
         return;
       }
 
@@ -229,7 +262,7 @@ export function App() {
     setConversionOutput(null);
     setJobPhase("analyzing");
     setJobMessage("正在创建转换任务");
-    setJobProgress(null);
+    setJobProgressGroups({});
     setActiveStep("output");
     conversionPendingRef.current = true;
 
@@ -239,6 +272,7 @@ export function App() {
         outputDir: targetOutputDir,
         settings: {
           ...(settings?.unknownPolicy === undefined ? {} : { unknownPolicy: settings.unknownPolicy }),
+          ...(settings?.downloadServerCore === undefined ? {} : { downloadServerCore: settings.downloadServerCore }),
           ...(settings?.outputZip === undefined ? {} : { outputZip: settings.outputZip })
         }
       });
@@ -273,6 +307,18 @@ export function App() {
       }
 
       const next = await window.serverpack.updateSettings({ outputZip: value });
+      setSettings(next);
+    },
+    [settings]
+  );
+
+  const updateDownloadServerCore = useCallback(
+    async (value: boolean) => {
+      if (!settings) {
+        return;
+      }
+
+      const next = await window.serverpack.updateSettings({ downloadServerCore: value });
       setSettings(next);
     },
     [settings]
@@ -477,6 +523,14 @@ export function App() {
               <label>
                 <input
                   type="checkbox"
+                  checked={settings?.downloadServerCore ?? false}
+                  onChange={(event) => void updateDownloadServerCore(event.currentTarget.checked)}
+                />
+                <span>直接下载核心</span>
+              </label>
+              <label>
+                <input
+                  type="checkbox"
                   checked={settings?.outputZip ?? false}
                   onChange={(event) => void updateOutputZip(event.currentTarget.checked)}
                 />
@@ -545,12 +599,11 @@ export function App() {
                   <strong>{phaseLabel(jobPhase)}</strong>
                   <small>{jobMessage}</small>
                 </div>
-                {jobProgress && (
-                  <div className="job-progress" aria-label="任务进度">
-                    <span style={{ width: `${Math.min(100, Math.round((jobProgress.current / jobProgress.total) * 100))}%` }} />
-                    <em>
-                      {jobProgress.current}/{jobProgress.total}
-                    </em>
+                {Object.entries(jobProgressGroups).length > 0 && (
+                  <div className="job-progress-stack" aria-label="任务进度">
+                    {Object.entries(jobProgressGroups).map(([group, progress]) => (
+                      <ProgressBar key={group} group={group as JobProgressGroup} progress={progress} />
+                    ))}
                   </div>
                 )}
                 <div className="job-actions">
@@ -663,6 +716,31 @@ function Readout({ label, value, wide = false }: { label: string; value: string;
   );
 }
 
+function ProgressBar({ group, progress }: { group: JobProgressGroup; progress: ProgressSnapshot }) {
+  const countPercent = progress.total > 0 ? Math.round((progress.current / progress.total) * 100) : 0;
+  const percent = Math.max(0, Math.min(100, progress.percent ?? countPercent));
+  const byteLabel =
+    progress.receivedBytes !== undefined
+      ? progress.totalBytes === undefined
+        ? formatBytes(progress.receivedBytes)
+        : `${formatBytes(progress.receivedBytes)} / ${formatBytes(progress.totalBytes)}`
+      : null;
+
+  return (
+    <div className="job-progress-item">
+      <div className="job-progress-meta">
+        <strong>{progressGroupLabel[group]}</strong>
+        <span>{progress.label ?? `${progress.current}/${progress.total}`}</span>
+        <em>{byteLabel ?? `${progress.current}/${progress.total}`}</em>
+      </div>
+      <div className="job-progress" aria-label={`${progressGroupLabel[group]}进度`}>
+        <span style={{ width: `${percent}%` }} />
+        <em>{percent}%</em>
+      </div>
+    </div>
+  );
+}
+
 function ModRow({ file }: { file: ModFileDescriptor }) {
   const decision = previewServerDecision(file);
 
@@ -752,4 +830,19 @@ function formatError(error: unknown): string {
     return String((error as { message: unknown }).message);
   }
   return "操作失败。请检查输入文件并重试。";
+}
+
+function formatBytes(value: number): string {
+  if (value < 1024) {
+    return `${value} B`;
+  }
+
+  const units = ["KB", "MB", "GB"];
+  let size = value / 1024;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  return `${size.toFixed(size >= 10 ? 1 : 2)} ${units[unitIndex]}`;
 }

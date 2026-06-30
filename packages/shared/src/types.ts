@@ -54,6 +54,7 @@ export interface ConversionRequestSettings {
   downloadTimeoutSeconds?: number | undefined;
   downloadRetry?: number | undefined;
   unknownPolicy?: ConversionSettings["unknownPolicy"] | undefined;
+  downloadServerCore?: boolean | undefined;
   outputZip?: boolean | undefined;
 }
 
@@ -128,6 +129,12 @@ export interface ConversionReport {
     installScripts: string[];
     startScripts: string[];
     supportFiles: string[];
+    coreInstall: {
+      enabled: boolean;
+      status: "skipped" | "installed" | "failed";
+      files: string[];
+      error?: string;
+    };
     zipPath?: string;
   };
   warnings: string[];
@@ -152,6 +159,7 @@ export interface ConversionSettings {
   maxFileCount: number;
   unknownPolicy: "manual-review" | "include" | "exclude";
   outputMode: "package-only" | "installable-server";
+  downloadServerCore: boolean;
   outputZip: boolean;
   theme: "system" | "light" | "dark";
   curseForgeApiKeyConfigured: boolean;
@@ -176,9 +184,22 @@ export interface JobId {
   id: string;
 }
 
+export type JobProgressGroup = "mods" | "core" | "package";
+
 export type JobEvent =
   | { type: "phase"; jobId: string; phase: ConversionPhase; message: string }
-  | { type: "progress"; jobId: string; current: number; total: number; bytesPerSecond?: number }
+  | {
+      type: "progress";
+      jobId: string;
+      current: number;
+      total: number;
+      group?: JobProgressGroup;
+      label?: string;
+      percent?: number;
+      receivedBytes?: number;
+      totalBytes?: number;
+      bytesPerSecond?: number;
+    }
   | { type: "log"; jobId: string; level: "debug" | "info" | "warn" | "error"; message: string }
   | { type: "completed"; jobId: string; outputDir: string; zipPath?: string; reportPath: string }
   | { type: "failed"; jobId: string; error: AppError; reportPath?: string }

@@ -95,6 +95,10 @@ describe("runConversion", () => {
       writtenModFiles: 1,
       skippedModFiles: 1,
       mergedOverrideFiles: 2,
+      coreInstall: {
+        enabled: false,
+        status: "skipped"
+      },
       core: {
         type: "fabric",
         minecraftVersion: "1.20.1",
@@ -183,6 +187,80 @@ describe("runConversion", () => {
     await expect(fs.access(path.join(result.outputDir, "mods", "missing.jar"))).rejects.toThrow();
     await expect(fs.access(path.join(result.outputDir, "start.ps1"))).resolves.toBeUndefined();
     await expect(fs.readFile(result.reportPath, "utf8")).resolves.toContain('"downloadStatus": "failed"');
+  });
+
+  it("can download a vanilla server core directly into the serverpack", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "mcsp-convert-core-"));
+    const inputPath = path.join(dir, "vanilla.mrpack");
+    const outputDir = path.join(dir, "out");
+    const serverJar = Buffer.from("server-jar");
+    const progressGroups: string[] = [];
+
+    await writeZip(inputPath, {
+      "modrinth.index.json": JSON.stringify({
+        formatVersion: 1,
+        name: "Vanilla Pack",
+        dependencies: {
+          minecraft: "1.20.1"
+        },
+        files: []
+      })
+    });
+
+    const result = await runConversion(
+      {
+        inputPath,
+        outputDir,
+        settings: {
+          downloadServerCore: true
+        }
+      },
+      {
+        fetchImpl: async (input) => {
+          const url = String(input);
+          if (url.endsWith("version_manifest_v2.json")) {
+            return new Response(
+              JSON.stringify({
+                versions: [{ id: "1.20.1", url: "https://example.invalid/1.20.1.json" }]
+              })
+            );
+          }
+          if (url.endsWith("1.20.1.json")) {
+            return new Response(
+              JSON.stringify({
+                downloads: {
+                  server: {
+                    url: "https://example.invalid/server.jar"
+                  }
+                }
+              })
+            );
+          }
+          if (url.endsWith("server.jar")) {
+            return new Response(serverJar, {
+              headers: {
+                "content-length": String(serverJar.length)
+              }
+            });
+          }
+          return new Response("not found", { status: 404 });
+        },
+        onEvent: (event) => {
+          if (event.type === "progress" && event.group) {
+            progressGroups.push(event.group);
+          }
+        }
+      }
+    );
+
+    await expect(fs.readFile(path.join(result.outputDir, "server.jar"))).resolves.toEqual(serverJar);
+    expect(result.report.serverpack.coreInstall).toMatchObject({
+      enabled: true,
+      status: "installed",
+      files: ["server.jar"]
+    });
+    await expect(fs.readFile(result.readmePath, "utf8")).resolves.toContain("服务端核心已准备完成");
+    expect(progressGroups).toContain("core");
   });
 });
 

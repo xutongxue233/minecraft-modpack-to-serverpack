@@ -14,6 +14,8 @@ import { type DownloadOptions, type DownloadResult, downloadFileToCache } from "
 import { enrichAnalysisWithPlatformMetadata } from "./metadata/platform-metadata";
 import { decideMods } from "./mod-analysis/decisions";
 import { inferModNameFromFile, scanDownloadedJarMetadata, type JarModMetadata } from "./mod-analysis/jar-metadata";
+import { prepareServerCore, skippedServerCoreInstallResult, type ServerCoreInstallResult } from "./serverpack/core-installer";
+import { selectServerCore } from "./serverpack/server-core";
 import { generateServerpack, type ServerpackGenerationResult } from "./serverpack/serverpack";
 import { createServerpackZip } from "./serverpack/zip-output";
 
@@ -62,9 +64,47 @@ export async function runConversion(
   const downloadResultsByFile = new Map<ModFileDescriptor, DownloadResult>();
   const downloadErrorsByFile = new Map<ModFileDescriptor, string>();
   let jarMetadataByFile = new Map<ModFileDescriptor, JarModMetadata>();
+  const serverCore = selectServerCore(analysis.metadata, { hasMods: analysis.files.length > 0 });
+  const shouldDownloadServerCore = request.settings?.downloadServerCore ?? false;
+  const coreInstallPromise = shouldDownloadServerCore
+    ? prepareServerCore({
+        outputDir,
+        core: serverCore,
+        enabled: true,
+        ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+        ...(request.settings?.downloadTimeoutSeconds === undefined
+          ? {}
+          : { timeoutSeconds: request.settings.downloadTimeoutSeconds }),
+        onProgress: (event) => {
+          emit({
+            type: "progress",
+            jobId,
+            group: "core",
+            current: event.current,
+            total: event.total,
+            label: event.label,
+            ...(event.percent === undefined ? {} : { percent: event.percent }),
+            ...(event.receivedBytes === undefined ? {} : { receivedBytes: event.receivedBytes }),
+            ...(event.totalBytes === undefined ? {} : { totalBytes: event.totalBytes })
+          });
+        },
+        onLog: (message) => emit({ type: "log", jobId, level: "info", message })
+      })
+    : Promise.resolve(skippedServerCoreInstallResult());
+  let coreInstall: ServerCoreInstallResult = skippedServerCoreInstallResult();
+
+  if (downloadableFiles.length > 0 || shouldDownloadServerCore) {
+    const downloadMessage =
+      downloadableFiles.length > 0 && shouldDownloadServerCore
+        ? "正在并行下载 Mod 文件和服务端核心"
+        : shouldDownloadServerCore
+          ? "正在下载服务端核心"
+          : "正在下载并校验 Mod 文件";
+    emit({ type: "phase", jobId, phase: "downloading", message: downloadMessage });
+  }
 
   if (downloadableFiles.length > 0) {
-    emit({ type: "phase", jobId, phase: "downloading", message: "正在下载并校验 Mod 文件" });
+    let completedDownloadFiles = 0;
     const downloadResults = await downloadFilesBestEffort(downloadableFiles, {
       cacheDir,
       ...(request.settings?.downloadConcurrent === undefined ? {} : { concurrent: request.settings.downloadConcurrent }),
@@ -82,9 +122,42 @@ export async function runConversion(
             message: `${event.fileName} 下载失败，正在重试 ${event.attempt}/${event.maxAttempts}。`
           });
         }
+        if (event.type === "file-start") {
+          emit({
+            type: "progress",
+            jobId,
+            group: "mods",
+            current: completedDownloadFiles,
+            total: downloadableFiles.length,
+            label: `开始下载 ${event.fileName}`
+          });
+        }
+        if (event.type === "file-progress") {
+          emit({
+            type: "progress",
+            jobId,
+            group: "mods",
+            current: completedDownloadFiles,
+            total: downloadableFiles.length,
+            label: event.fileName,
+            receivedBytes: event.receivedBytes,
+            ...(event.totalBytes === undefined
+              ? {}
+              : { totalBytes: event.totalBytes, percent: Math.round((event.receivedBytes / event.totalBytes) * 100) })
+          });
+        }
       }
     }, (completedFiles) => {
-      emit({ type: "progress", jobId, current: completedFiles, total: downloadableFiles.length });
+      completedDownloadFiles = completedFiles;
+      emit({
+        type: "progress",
+        jobId,
+        group: "mods",
+        current: completedFiles,
+        total: downloadableFiles.length,
+        label: `Mod 文件 ${completedFiles}/${downloadableFiles.length}`,
+        percent: Math.round((completedFiles / downloadableFiles.length) * 100)
+      });
     });
 
     for (const result of downloadResults.results) {
@@ -105,6 +178,12 @@ export async function runConversion(
     jarMetadataByFile = await scanDownloadedJarMetadata(downloadResults.results);
   }
 
+  coreInstall = await coreInstallPromise;
+  if (coreInstall.status === "failed" && coreInstall.error) {
+    warnings.push(`服务端核心直接下载失败：${coreInstall.error}`);
+    emit({ type: "log", jobId, level: "warn", message: `服务端核心直接下载失败：${coreInstall.error}` });
+  }
+
   emit({ type: "phase", jobId, phase: "reviewing", message: "正在生成服务端 Mod 决策" });
   const decisions = decideMods(analysis.files, {
     unknownPolicy: request.settings?.unknownPolicy ?? "manual-review",
@@ -117,7 +196,9 @@ export async function runConversion(
     outputDir,
     analysis,
     decisions,
-    downloadResultsByFile
+    downloadResultsByFile,
+    core: serverCore,
+    coreInstall
   });
   warnings.push(...serverpack.warnings);
 
@@ -302,6 +383,12 @@ function buildConversionReport({
       installScripts: serverpack.installScripts,
       startScripts: serverpack.startScripts,
       supportFiles: serverpack.supportFiles,
+      coreInstall: {
+        enabled: serverpack.coreInstall.enabled,
+        status: serverpack.coreInstall.status,
+        files: serverpack.coreInstall.files,
+        ...(serverpack.coreInstall.error === undefined ? {} : { error: serverpack.coreInstall.error })
+      },
       ...(zipPath === undefined ? {} : { zipPath })
     },
     warnings,
@@ -341,10 +428,13 @@ function renderReadme(report: ConversionReport): string {
     `- 核心：${report.serverpack.core.type}`,
     `- 推荐 Java：${report.serverpack.core.javaMajor}`,
     ...report.serverpack.core.notes.map((line) => `- ${line}`),
+    `- 核心直接下载：${formatCoreInstallStatus(report.serverpack.coreInstall.status)}`,
     "",
     "## 部署提示",
     "",
-    "- 首次部署时运行 `install-server.ps1` 或 `install-server.bat` 下载并安装对应服务端核心。",
+    report.serverpack.coreInstall.status === "installed"
+      ? "- 服务端核心已准备完成，接受 EULA 后可直接运行 `start.ps1` 或 `start.bat`。"
+      : "- 首次部署时运行 `install-server.ps1` 或 `install-server.bat` 下载并安装对应服务端核心。",
     "- Linux/macOS 可尝试运行 `bash install-server.sh`，脚本依赖 `curl`、`python3` 和 `java`。",
     "- 安装完成后阅读并接受 Minecraft EULA，把 `eula.txt` 中的 `eula=false` 改为 `eula=true`。",
     "- 启动服务端请运行 `start.ps1`、`start.bat` 或 `start.sh`。",
@@ -358,4 +448,15 @@ function renderReadme(report: ConversionReport): string {
 function sanitizePathSegment(value: string): string {
   const sanitized = value.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").trim();
   return sanitized || "serverpack";
+}
+
+function formatCoreInstallStatus(status: ConversionReport["serverpack"]["coreInstall"]["status"]): string {
+  switch (status) {
+    case "installed":
+      return "已完成";
+    case "failed":
+      return "失败，需运行安装脚本或查看报告";
+    case "skipped":
+      return "未启用";
+  }
 }

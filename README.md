@@ -19,10 +19,12 @@ Keywords: Minecraft serverpack generator, Minecraft modpack converter, CurseForg
 - Generates a serverpack directory with selected `mods/`, server-safe overrides, `server-core.json`, EULA placeholder, JVM args, install scripts, and start scripts.
 - Optionally writes a distributable serverpack `.zip` next to the generated directory.
 - Selects the server core from pack metadata: Vanilla, Fabric, Quilt, Forge, or NeoForge, including Java version guidance.
+- Optional direct server core download/install, so generated packs can start from `start.bat` / `start.ps1` after the EULA is accepted.
+- Grouped progress for Mod downloads and server core downloads, with counts, percentages, and current file/task details.
 
 ## Current Status
 
-This project is in early MVP development. It now covers parsing, metadata enrichment, downloads, server-side filtering, initial serverpack directory generation, optional zip output, reports, and the desktop workflow. Richer packwiz remote metadata support, user review workflows, and release packaging automation will continue to improve.
+This project is in early MVP development. It now covers parsing, metadata enrichment, downloads, server-side filtering, initial serverpack directory generation, optional direct server core installation, optional zip output, reports, and the desktop workflow. Richer packwiz remote metadata support, user review workflows, and release packaging automation will continue to improve.
 
 ## Supported Modpack Formats
 
@@ -122,7 +124,7 @@ pnpm dist:win
 ## Roadmap
 
 - Improve `overrides/` and `server-overrides/` merge rules with user-editable filters.
-- Harden loader server installation scripts with more compatibility checks.
+- Harden direct loader installation with more compatibility checks and fallback handling.
 - Add user-editable client-only and server-only rule sets.
 - Add GitHub Release automation for Windows installers and portable builds.
 - Improve packwiz remote metadata and hash handling.
