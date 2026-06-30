@@ -1,0 +1,25 @@
+{
+  "name": "@mcsp/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@mcsp/shared": "workspace:*",
+    "smol-toml": "^1.7.0",
+    "yauzl": "^3.2.0",
+    "yazl": "^3.3.1"
+  },
+  "devDependencies": {
+    "@types/yauzl": "^2.10.3",
+    "@types/yazl": "^3.3.1"
+  }
+}

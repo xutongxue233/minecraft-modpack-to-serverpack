@@ -1,0 +1,21 @@
+appId: com.mcsp.converter
+productName: Minecraft Serverpack Tool
+directories:
+  output: release
+files:
+  - out/**
+  - package.json
+win:
+  signAndEditExecutable: false
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+nsis:
+  artifactName: "${productName}-Setup-${version}-${arch}.${ext}"
+portable:
+  artifactName: "${productName}-Portable-${version}-${arch}.${ext}"
+asar: true

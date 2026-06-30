@@ -1,0 +1,41 @@
+{
+  "name": "minecraft-modpack-to-serverpack",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Desktop tool for converting Minecraft modpacks into server packs.",
+  "keywords": [
+    "minecraft",
+    "minecraft-server",
+    "minecraft-modpack",
+    "serverpack",
+    "modpack-converter",
+    "curseforge",
+    "modrinth",
+    "packwiz",
+    "electron",
+    "desktop-app"
+  ],
+  "homepage": "https://github.com/xutongxue233/minecraft-modpack-to-serverpack#readme",
+  "bugs": {
+    "url": "https://github.com/xutongxue233/minecraft-modpack-to-serverpack/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xutongxue233/minecraft-modpack-to-serverpack.git"
+  },
+  "license": "MIT",
+  "packageManager": "pnpm@11.7.0",
+  "scripts": {
+    "dev": "pnpm --filter @mcsp/desktop dev",
+    "build": "pnpm --filter @mcsp/shared build && pnpm --filter @mcsp/core build && pnpm --filter @mcsp/desktop build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "vitest run",
+    "dist:dir": "pnpm --filter @mcsp/desktop dist:dir",
+    "dist:win": "pnpm --filter @mcsp/desktop dist:win"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  }
+}
