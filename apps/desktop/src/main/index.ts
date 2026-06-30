@@ -119,6 +119,15 @@ function registerIpc(): void {
     return result.canceled ? null : (result.filePaths[0] ?? null);
   });
 
+  ipcMain.handle("dialog:select-java-home", async () => {
+    const result = await dialog.showOpenDialog({
+      title: "选择 Java/JDK 目录",
+      properties: ["openDirectory"]
+    });
+
+    return result.canceled ? null : (result.filePaths[0] ?? null);
+  });
+
   ipcMain.handle("job:analyze", async (_event, rawRequest) => {
     try {
       const request = AnalyzeRequestSchema.parse(rawRequest);
@@ -148,12 +157,16 @@ function registerIpc(): void {
   });
 
   ipcMain.handle("settings:update", async (_event, rawRequest) => {
-    const request = UpdateSettingsRequestSchema.parse(rawRequest) as SettingsUpdateRequest;
-    const current = await readStoredSettings();
-    const next = mergeStoredSettings(current, request);
-    await writeStoredSettings(next);
-    applyCurseForgeApiKeyToEnv(next);
-    return toPublicSettings(next);
+    try {
+      const request = UpdateSettingsRequestSchema.parse(rawRequest) as SettingsUpdateRequest;
+      const current = await readStoredSettings();
+      const next = mergeStoredSettings(current, request);
+      await writeStoredSettings(next);
+      applyCurseForgeApiKeyToEnv(next);
+      return toPublicSettings(next);
+    } catch (error) {
+      throw unknownToAppError(error, "E_SETTINGS_UPDATE_FAILED");
+    }
   });
 
   ipcMain.handle("path:open", async (_event, rawRequest) => {
@@ -225,7 +238,10 @@ function withRuntimeConversionSettings(request: ConversionRequest, settings: Con
       downloadRetry: request.settings?.downloadRetry ?? settings.downloadRetry,
       unknownPolicy: request.settings?.unknownPolicy ?? settings.unknownPolicy,
       downloadServerCore: request.settings?.downloadServerCore ?? settings.downloadServerCore,
-      outputZip: request.settings?.outputZip ?? settings.outputZip
+      outputZip: request.settings?.outputZip ?? settings.outputZip,
+      ...(request.settings?.javaHome !== undefined || settings.javaHome !== undefined
+        ? { javaHome: request.settings?.javaHome ?? settings.javaHome }
+        : {})
     }
   };
 }
@@ -240,7 +256,12 @@ function toPublicSettings(stored: StoredSettings): ConversionSettings {
 }
 
 function mergeStoredSettings(current: StoredSettings, patch: SettingsUpdateRequest): StoredSettings {
-  const { curseForgeApiKey, curseForgeApiKeyConfigured: _configured, ...publicPatch } = patch as SettingsUpdateRequest & {
+  const {
+    curseForgeApiKey,
+    curseForgeApiKeyConfigured: _configured,
+    javaHome,
+    ...publicPatch
+  } = patch as SettingsUpdateRequest & {
     curseForgeApiKeyConfigured?: boolean;
   };
   const next = mergeDefined(current, publicPatch);
@@ -252,7 +273,32 @@ function mergeStoredSettings(current: StoredSettings, patch: SettingsUpdateReque
       delete next.curseForgeApiKey;
     }
   }
+  if (javaHome !== undefined) {
+    const normalized = normalizeJavaHome(javaHome);
+    if (normalized) {
+      next.javaHome = normalized;
+    } else {
+      delete next.javaHome;
+    }
+  }
   return next;
+}
+
+function normalizeJavaHome(javaHome: string | null): string | undefined {
+  const normalized = javaHome?.trim() ?? "";
+  if (!normalized) {
+    return undefined;
+  }
+
+  const javaCommand = path.join(normalized, "bin", process.platform === "win32" ? "java.exe" : "java");
+  if (!existsSync(javaCommand)) {
+    throw appError("E_INVALID_JAVA_HOME", "选择的目录不是有效的 Java Home。", {
+      detail: { javaHome: normalized, expectedJava: javaCommand },
+      suggestion: "请选择 JDK/JRE 根目录，例如 D:\\Environment\\JDK17，而不是 bin 目录。"
+    });
+  }
+
+  return normalized;
 }
 
 function applyCurseForgeApiKeyToEnv(settings: StoredSettings): void {

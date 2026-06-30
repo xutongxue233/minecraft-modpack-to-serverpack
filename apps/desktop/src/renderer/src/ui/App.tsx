@@ -16,6 +16,7 @@ import {
   Play,
   ShieldCheck,
   Square,
+  Terminal,
   Upload,
   X
 } from "lucide-react";
@@ -185,6 +186,13 @@ export function App() {
     return compactPath(outputDir, 64);
   }, [outputDir]);
 
+  const javaHomePath = useMemo(() => {
+    if (!settings?.javaHome) {
+      return "未配置，使用系统 PATH 中的 java";
+    }
+    return compactPath(settings.javaHome, 64);
+  }, [settings?.javaHome]);
+
   const applyInputSelection = useCallback((selected: InputSelection) => {
     setInput(selected);
     setAnalysis(null);
@@ -257,7 +265,8 @@ export function App() {
         settings: {
           ...(settings?.unknownPolicy === undefined ? {} : { unknownPolicy: settings.unknownPolicy }),
           ...(settings?.downloadServerCore === undefined ? {} : { downloadServerCore: settings.downloadServerCore }),
-          ...(settings?.outputZip === undefined ? {} : { outputZip: settings.outputZip })
+          ...(settings?.outputZip === undefined ? {} : { outputZip: settings.outputZip }),
+          ...(settings?.javaHome === undefined ? {} : { javaHome: settings.javaHome })
         }
       });
       if (conversionPendingRef.current) {
@@ -307,6 +316,42 @@ export function App() {
     },
     [settings]
   );
+
+  const selectJavaHome = useCallback(async () => {
+    if (!settings) {
+      return;
+    }
+
+    setError(null);
+    setSettingsMessage(null);
+    try {
+      const selected = await window.serverpack.selectJavaHome();
+      if (!selected) {
+        return;
+      }
+      const next = await window.serverpack.updateSettings({ javaHome: selected });
+      setSettings(next);
+      setSettingsMessage("Java Home 已保存");
+    } catch (rawError) {
+      setError(formatError(rawError));
+    }
+  }, [settings]);
+
+  const clearJavaHome = useCallback(async () => {
+    if (!settings) {
+      return;
+    }
+
+    setError(null);
+    setSettingsMessage(null);
+    try {
+      const next = await window.serverpack.updateSettings({ javaHome: null });
+      setSettings(next);
+      setSettingsMessage("Java Home 已清除，将使用系统 PATH");
+    } catch (rawError) {
+      setError(formatError(rawError));
+    }
+  }, [settings]);
 
   const saveCurseForgeApiKey = useCallback(async () => {
     const nextKey = apiKeyDraft.trim();
@@ -484,6 +529,29 @@ export function App() {
                 <input type="checkbox" checked readOnly />
                 <span>未知 Mod 进入复核</span>
               </label>
+            </div>
+
+            <div className="java-home-panel">
+              <div className="java-home-title">
+                <Terminal size={16} />
+                <span>Java 运行环境</span>
+                <strong className={settings?.javaHome ? "configured" : ""}>
+                  {settings?.javaHome ? "已配置" : "系统默认"}
+                </strong>
+              </div>
+              <div className="java-home-row">
+                <output title={settings?.javaHome || undefined}>{javaHomePath}</output>
+                <button type="button" onClick={selectJavaHome}>
+                  <FolderOpen size={15} />
+                  选择 JDK
+                </button>
+                {settings?.javaHome && (
+                  <button className="ghost" type="button" onClick={clearJavaHome}>
+                    清除
+                  </button>
+                )}
+              </div>
+              <p className="settings-message">用于直接下载核心时运行 Forge、Fabric、Quilt 安装器。</p>
             </div>
 
             <div className="api-key-panel">

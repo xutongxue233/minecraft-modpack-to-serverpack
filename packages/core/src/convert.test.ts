@@ -135,6 +135,11 @@ describe("runConversion", () => {
     await expect(fs.readFile(result.reportPath, "utf8")).resolves.toContain('"zipPath"');
     await expect(fs.readFile(result.readmePath, "utf8")).resolves.toContain("Minecraft: 1.20.1");
     await expect(fs.readFile(result.readmePath, "utf8")).resolves.toContain("install-server.ps1");
+    await expect(fs.readFile(path.join(result.outputDir, "install-server.ps1"), "utf8")).resolves.toContain(
+      "Resolve-JavaCommand"
+    );
+    await expect(fs.readFile(path.join(result.outputDir, "start.bat"), "utf8")).resolves.toContain("JAVA_HOME");
+    await expect(fs.readFile(path.join(result.outputDir, "start.sh"), "utf8")).resolves.toContain("JAVA_CMD");
     expect(events).toContain("analyzing");
     expect(events).toContain("downloading");
     expect(events).toContain("completed");

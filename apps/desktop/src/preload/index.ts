@@ -15,6 +15,7 @@ const api = {
   selectInput: (): Promise<InputSelection | null> => ipcRenderer.invoke("dialog:select-input"),
   selectInputDirectory: (): Promise<InputSelection | null> => ipcRenderer.invoke("dialog:select-input-directory"),
   selectOutputDir: (): Promise<string | null> => ipcRenderer.invoke("dialog:select-output-dir"),
+  selectJavaHome: (): Promise<string | null> => ipcRenderer.invoke("dialog:select-java-home"),
   analyzeInput: (request: AnalyzeRequest): Promise<AnalyzeResult> => ipcRenderer.invoke("job:analyze", request),
   startConversion: (request: ConversionRequest): Promise<JobId> => ipcRenderer.invoke("job:start", request),
   cancelJob: (jobId: string): Promise<boolean> => ipcRenderer.invoke("job:cancel", { id: jobId }),

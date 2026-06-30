@@ -75,6 +75,7 @@ export async function runConversion(
         ...(request.settings?.downloadTimeoutSeconds === undefined
           ? {}
           : { timeoutSeconds: request.settings.downloadTimeoutSeconds }),
+        ...(request.settings?.javaHome === undefined ? {} : { javaHome: request.settings.javaHome }),
         onProgress: (event) => {
           emit({
             type: "progress",
@@ -435,7 +436,8 @@ function renderReadme(report: ConversionReport): string {
     report.serverpack.coreInstall.status === "installed"
       ? "- 服务端核心已准备完成，接受 EULA 后可直接运行 `start.ps1` 或 `start.bat`。"
       : "- 首次部署时运行 `install-server.ps1` 或 `install-server.bat` 下载并安装对应服务端核心。",
-    "- Linux/macOS 可尝试运行 `bash install-server.sh`，脚本依赖 `curl`、`python3` 和 `java`。",
+    "- 脚本会优先使用 `JAVA_HOME` 指向的 Java；未配置时回退到系统 `java`。",
+    "- Linux/macOS 可尝试运行 `bash install-server.sh`，脚本依赖 `curl`、`python3` 和兼容 Java。",
     "- 安装完成后阅读并接受 Minecraft EULA，把 `eula.txt` 中的 `eula=false` 改为 `eula=true`。",
     "- 启动服务端请运行 `start.ps1`、`start.bat` 或 `start.sh`。",
     "- 内存参数在 `user_jvm_args.txt` 中调整，默认 `-Xms1G`、`-Xmx4G`。",

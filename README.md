@@ -20,6 +20,7 @@ Keywords: Minecraft serverpack generator, Minecraft modpack converter, CurseForg
 - Optionally writes a distributable serverpack `.zip` next to the generated directory.
 - Selects the server core from pack metadata: Vanilla, Fabric, Quilt, Forge, or NeoForge, including Java version guidance.
 - Optional direct server core download/install, so generated packs can start from `start.bat` / `start.ps1` after the EULA is accepted.
+- Configurable Java Home for local core installation; generated scripts also prefer `JAVA_HOME` before falling back to `java` on `PATH`.
 - Grouped progress for Mod downloads and server core downloads, with counts, percentages, and current file/task details.
 
 ## Current Status

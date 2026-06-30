@@ -15,7 +15,8 @@ export const ConversionRequestSchema = z.object({
       downloadRetry: z.number().int().min(0).max(10).optional(),
       unknownPolicy: z.enum(["manual-review", "include", "exclude"]).optional(),
       downloadServerCore: z.boolean().optional(),
-      outputZip: z.boolean().optional()
+      outputZip: z.boolean().optional(),
+      javaHome: z.string().optional()
     })
     .optional()
 });
@@ -36,6 +37,7 @@ export const UpdateSettingsRequestSchema = z.object({
   outputMode: z.enum(["package-only", "installable-server"]).optional(),
   downloadServerCore: z.boolean().optional(),
   outputZip: z.boolean().optional(),
+  javaHome: z.string().nullable().optional(),
   theme: z.enum(["system", "light", "dark"]).optional(),
   curseForgeApiKey: z.string().nullable().optional()
 });

@@ -56,6 +56,7 @@ export interface ConversionRequestSettings {
   unknownPolicy?: ConversionSettings["unknownPolicy"] | undefined;
   downloadServerCore?: boolean | undefined;
   outputZip?: boolean | undefined;
+  javaHome?: string | undefined;
 }
 
 export interface ConversionRequest {
@@ -161,12 +162,14 @@ export interface ConversionSettings {
   outputMode: "package-only" | "installable-server";
   downloadServerCore: boolean;
   outputZip: boolean;
+  javaHome?: string;
   theme: "system" | "light" | "dark";
   curseForgeApiKeyConfigured: boolean;
 }
 
-export type SettingsUpdateRequest = Partial<Omit<ConversionSettings, "curseForgeApiKeyConfigured">> & {
+export type SettingsUpdateRequest = Partial<Omit<ConversionSettings, "curseForgeApiKeyConfigured" | "javaHome">> & {
   curseForgeApiKey?: string | null;
+  javaHome?: string | null;
 };
 
 export type ConversionPhase =

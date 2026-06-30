@@ -27,7 +27,7 @@ export function selectServerCore(metadata: PackMetadata, options: { hasMods?: bo
     warnings.push(`${displayLoader(type)} 未声明加载器版本，安装脚本会写入占位值，需要手动补全后再运行。`);
   }
 
-  notes.push(`推荐 Java ${javaMajor}，请确保服务器运行环境的 java 命令指向兼容版本。`);
+  notes.push(`推荐 Java ${javaMajor}，请确保服务器运行环境的 JAVA_HOME 或 java 命令指向兼容版本。`);
 
   if (type === "forge" || type === "neoforge") {
     notes.push("Forge/NeoForge 安装器通常会生成 run.bat/run.sh，启动脚本会优先调用这些官方脚本。");

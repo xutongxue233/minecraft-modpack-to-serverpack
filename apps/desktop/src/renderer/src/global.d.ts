@@ -16,6 +16,7 @@ declare global {
       selectInput: () => Promise<InputSelection | null>;
       selectInputDirectory: () => Promise<InputSelection | null>;
       selectOutputDir: () => Promise<string | null>;
+      selectJavaHome: () => Promise<string | null>;
       analyzeInput: (request: AnalyzeRequest) => Promise<AnalyzeResult>;
       startConversion: (request: ConversionRequest) => Promise<JobId>;
       cancelJob: (jobId: string) => Promise<boolean>;
