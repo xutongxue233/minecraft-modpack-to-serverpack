@@ -52,7 +52,7 @@ async function createWindow(): Promise<void> {
     maximizable: false,
     fullscreenable: false,
     backgroundColor: "#151814",
-    title: "Minecraft Serverpack Tool",
+    title: "整合包转服务端包工具",
     webPreferences: {
       preload: resolvePreloadPath(),
       nodeIntegration: false,

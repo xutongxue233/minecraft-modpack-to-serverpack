@@ -14,7 +14,6 @@ import {
   Minus,
   PackageOpen,
   Play,
-  Settings,
   ShieldCheck,
   Square,
   Upload,
@@ -28,15 +27,6 @@ import type {
   JobProgressGroup,
   ModFileDescriptor
 } from "@mcsp/shared";
-
-type StepKey = "input" | "analyze" | "review" | "output";
-
-const steps: Array<{ key: StepKey; label: string; detail: string }> = [
-  { key: "input", label: "导入", detail: "选择包" },
-  { key: "analyze", label: "解析", detail: "读取清单" },
-  { key: "review", label: "复核", detail: "筛选 Mod" },
-  { key: "output", label: "输出", detail: "生成服务端包" }
-];
 
 const sourceName: Record<string, string> = {
   modrinth: "Modrinth",
@@ -65,7 +55,6 @@ export function App() {
   const [outputDir, setOutputDir] = useState<string>("");
   const [settings, setSettings] = useState<ConversionSettings | null>(null);
   const [analysis, setAnalysis] = useState<AnalyzeResult | null>(null);
-  const [activeStep, setActiveStep] = useState<StepKey>("input");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -150,7 +139,6 @@ export function App() {
           reportPath: event.reportPath,
           ...(event.zipPath === undefined ? {} : { zipPath: event.zipPath })
         });
-        setActiveStep("output");
         return;
       }
 
@@ -200,7 +188,6 @@ export function App() {
   const applyInputSelection = useCallback((selected: InputSelection) => {
     setInput(selected);
     setAnalysis(null);
-    setActiveStep("input");
   }, []);
 
   const selectInput = useCallback(async () => {
@@ -234,12 +221,10 @@ export function App() {
 
     setBusy(true);
     setError(null);
-    setActiveStep("analyze");
 
     try {
       const result = await window.serverpack.analyzeInput({ inputPath: input.path });
       setAnalysis(result);
-      setActiveStep("review");
     } catch (rawError) {
       setError(formatError(rawError));
     } finally {
@@ -263,7 +248,6 @@ export function App() {
     setJobPhase("analyzing");
     setJobMessage("正在创建转换任务");
     setJobProgressGroups({});
-    setActiveStep("output");
     conversionPendingRef.current = true;
 
     try {
@@ -397,9 +381,9 @@ export function App() {
       <header className="window-bar">
         <div className="window-identity" aria-label="应用窗口">
           <Box size={16} strokeWidth={1.9} />
-          <span>Minecraft Serverpack Tool</span>
+          <span>整合包转服务端包工具</span>
         </div>
-        <div className="window-drag-note">local desktop build</div>
+        <div className="window-drag-zone" aria-hidden="true" />
         <div className="window-controls">
           <button type="button" title="最小化" onClick={() => void window.serverpack.minimizeWindow()}>
             <Minus size={15} />
@@ -410,32 +394,6 @@ export function App() {
         </div>
       </header>
 
-      <aside className="rail" aria-label="应用导航">
-        <div className="brand-block" aria-label="Minecraft Serverpack Tool">
-          <Box size={24} strokeWidth={1.8} />
-          <span>MS</span>
-        </div>
-
-        <nav className="rail-steps" aria-label="转换阶段">
-          {steps.map((step, index) => (
-            <button
-              key={step.key}
-              className={`rail-step ${activeStep === step.key ? "active" : ""}`}
-              type="button"
-              title={`${step.label}：${step.detail}`}
-              onClick={() => setActiveStep(step.key)}
-            >
-              <span>{String(index + 1).padStart(2, "0")}</span>
-              {step.label}
-            </button>
-          ))}
-        </nav>
-
-        <button className="rail-tool" type="button" title="设置">
-          <Settings size={18} />
-        </button>
-      </aside>
-
       <section className="workbench">
         <header className="command-header">
           <div className="command-title">
@@ -443,7 +401,7 @@ export function App() {
               <Box size={20} />
             </span>
             <div className="title-stack">
-              <p className="eyebrow">Serverpack converter / local workstation</p>
+              <p className="eyebrow">服务端包转换 / 本地工作台</p>
               <h1>整合包转换台</h1>
             </div>
           </div>
@@ -457,20 +415,6 @@ export function App() {
             </span>
           </div>
         </header>
-
-        <section className="chunk-strip" aria-label="转换流水线">
-          {steps.map((step) => (
-            <button
-              key={step.key}
-              type="button"
-              className={`chunk ${activeStep === step.key ? "active" : ""} ${isStepComplete(step.key, analysis) ? "done" : ""}`}
-              onClick={() => setActiveStep(step.key)}
-            >
-              <span>{step.label}</span>
-              <strong>{step.detail}</strong>
-            </button>
-          ))}
-        </section>
 
         <section className="console-grid">
           <section className="source-console" aria-labelledby="source-title">
@@ -756,16 +700,6 @@ function ModRow({ file }: { file: ModFileDescriptor }) {
       </span>
     </div>
   );
-}
-
-function isStepComplete(step: StepKey, analysis: AnalyzeResult | null): boolean {
-  if (step === "input") {
-    return true;
-  }
-  if (step === "analyze" || step === "review") {
-    return Boolean(analysis);
-  }
-  return false;
 }
 
 function compactPath(value: string, maxLength: number): string {
