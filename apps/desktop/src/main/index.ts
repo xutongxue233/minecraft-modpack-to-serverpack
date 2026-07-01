@@ -36,6 +36,8 @@ const defaultSettings: ConversionSettings = {
   unknownPolicy: "manual-review",
   outputMode: "package-only",
   downloadServerCore: false,
+  testStartScript: true,
+  startupTestTimeoutSeconds: 60,
   outputZip: false,
   theme: "system",
   curseForgeApiKeyConfigured: false
@@ -263,6 +265,8 @@ function withRuntimeConversionSettings(request: ConversionRequest, settings: Con
       downloadRetry: request.settings?.downloadRetry ?? settings.downloadRetry,
       unknownPolicy: request.settings?.unknownPolicy ?? settings.unknownPolicy,
       downloadServerCore: request.settings?.downloadServerCore ?? settings.downloadServerCore,
+      testStartScript: request.settings?.testStartScript ?? settings.testStartScript,
+      startupTestTimeoutSeconds: request.settings?.startupTestTimeoutSeconds ?? settings.startupTestTimeoutSeconds,
       outputZip: request.settings?.outputZip ?? settings.outputZip,
       ...(request.settings?.javaHome !== undefined || settings.javaHome !== undefined
         ? { javaHome: request.settings?.javaHome ?? settings.javaHome }

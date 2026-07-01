@@ -7,6 +7,7 @@ import {
   type JobEvent,
   type ModDecision,
   type ModFileDescriptor,
+  appError,
   unknownToAppError
 } from "@mcsp/shared";
 import { analyzeInput } from "./analyze";
@@ -18,6 +19,11 @@ import { loadModDecisionRules } from "./mod-analysis/user-rules";
 import { prepareServerCore, skippedServerCoreInstallResult, type ServerCoreInstallResult } from "./serverpack/core-installer";
 import { selectServerCore } from "./serverpack/server-core";
 import { generateServerpack, type ServerpackGenerationResult } from "./serverpack/serverpack";
+import {
+  runServerpackStartupTest,
+  type RunStartupTestOptions,
+  type StartupTestResult
+} from "./serverpack/startup-test";
 import { createServerpackZip } from "./serverpack/zip-output";
 
 type ReportDownloadStatus = ConversionReport["files"][number]["downloadStatus"];
@@ -29,6 +35,7 @@ export interface RunConversionOptions {
   fetchImpl?: typeof fetch;
   onEvent?: (event: JobEvent) => void;
   now?: () => Date;
+  startupTestRunner?: (options: RunStartupTestOptions) => Promise<StartupTestResult>;
 }
 
 export async function runConversion(
@@ -72,6 +79,7 @@ export async function runConversion(
   let jarMetadataByFile = new Map<ModFileDescriptor, JarModMetadata>();
   const serverCore = selectServerCore(analysis.metadata, { hasMods: analysis.files.length > 0 });
   const shouldDownloadServerCore = request.settings?.downloadServerCore ?? false;
+  const shouldTestStartScript = request.settings?.testStartScript ?? shouldDownloadServerCore;
   const coreInstallPromise = shouldDownloadServerCore
     ? prepareServerCore({
         outputDir,
@@ -136,7 +144,8 @@ export async function runConversion(
             group: "mods",
             current: completedDownloadFiles,
             total: downloadableFiles.length,
-            label: `开始下载 ${event.fileName}`
+            label: `正在下载 ${event.fileName}`,
+            percent: Math.round((completedDownloadFiles / downloadableFiles.length) * 100)
           });
         }
         if (event.type === "file-progress") {
@@ -146,11 +155,8 @@ export async function runConversion(
             group: "mods",
             current: completedDownloadFiles,
             total: downloadableFiles.length,
-            label: event.fileName,
-            receivedBytes: event.receivedBytes,
-            ...(event.totalBytes === undefined
-              ? {}
-              : { totalBytes: event.totalBytes, percent: Math.round((event.receivedBytes / event.totalBytes) * 100) })
+            label: `正在下载 ${event.fileName}`,
+            percent: Math.round((completedDownloadFiles / downloadableFiles.length) * 100)
           });
         }
       }
@@ -210,6 +216,30 @@ export async function runConversion(
   });
   warnings.push(...serverpack.warnings);
 
+  let startupTest: StartupTestResult = {
+    enabled: shouldTestStartScript,
+    status: "skipped",
+    reason: shouldTestStartScript ? "服务端核心未直接安装，跳过启动脚本测试。" : "未启用启动脚本测试。"
+  };
+
+  if (shouldTestStartScript && coreInstall.status === "installed") {
+    emit({ type: "phase", jobId, phase: "testing", message: "正在运行启动脚本测试" });
+    const startupTestRunner = options.startupTestRunner ?? runServerpackStartupTest;
+    startupTest = await startupTestRunner({
+      outputDir,
+      ...(request.settings?.startupTestTimeoutSeconds === undefined
+        ? {}
+        : { timeoutSeconds: request.settings.startupTestTimeoutSeconds }),
+      ...(request.settings?.javaHome === undefined ? {} : { javaHome: request.settings.javaHome }),
+      onLog: (level, message) => emit({ type: "log", jobId, level, message })
+    });
+  } else if (shouldTestStartScript) {
+    throw appError("E_STARTUP_TEST_SKIPPED", "已启用启动脚本测试，但服务端核心未安装成功。", {
+      detail: { coreInstallStatus: coreInstall.status, coreInstallError: coreInstall.error },
+      suggestion: "请开启“直接下载核心”并确认核心安装成功，或关闭“启动脚本测试”后只生成服务端包文件。"
+    });
+  }
+
   const report = buildConversionReport({
     request,
     analysis,
@@ -218,6 +248,7 @@ export async function runConversion(
     downloadErrorsByFile,
     jarMetadataByFile,
     serverpack,
+    startupTest,
     ...(zipPath === undefined ? {} : { zipPath }),
     warnings,
     now: options.now ?? (() => new Date())
@@ -288,6 +319,7 @@ function buildConversionReport({
   downloadErrorsByFile,
   jarMetadataByFile,
   serverpack,
+  startupTest,
   zipPath,
   warnings,
   now
@@ -299,6 +331,7 @@ function buildConversionReport({
   downloadErrorsByFile: Map<ModFileDescriptor, string>;
   jarMetadataByFile: Map<ModFileDescriptor, JarModMetadata>;
   serverpack: ServerpackGenerationResult;
+  startupTest: StartupTestResult;
   zipPath?: string;
   warnings: string[];
   now: () => Date;
@@ -397,6 +430,12 @@ function buildConversionReport({
         files: serverpack.coreInstall.files,
         ...(serverpack.coreInstall.error === undefined ? {} : { error: serverpack.coreInstall.error })
       },
+      startupTest: {
+        enabled: startupTest.enabled,
+        status: startupTest.status,
+        ...(startupTest.exitCode === undefined ? {} : { exitCode: startupTest.exitCode }),
+        ...(startupTest.reason === undefined ? {} : { reason: startupTest.reason })
+      },
       ...(zipPath === undefined ? {} : { zipPath })
     },
     warnings,
@@ -437,6 +476,7 @@ function renderReadme(report: ConversionReport): string {
     `- 推荐 Java：${report.serverpack.core.javaMajor}`,
     ...report.serverpack.core.notes.map((line) => `- ${line}`),
     `- 核心直接下载：${formatCoreInstallStatus(report.serverpack.coreInstall.status)}`,
+    `- 启动脚本测试：${formatStartupTestStatus(report.serverpack.startupTest.status)}`,
     "",
     "## 部署提示",
     "",
@@ -467,5 +507,16 @@ function formatCoreInstallStatus(status: ConversionReport["serverpack"]["coreIns
       return "失败，需运行安装脚本或查看报告";
     case "skipped":
       return "未启用";
+  }
+}
+
+function formatStartupTestStatus(status: ConversionReport["serverpack"]["startupTest"]["status"]): string {
+  switch (status) {
+    case "passed":
+      return "已通过";
+    case "failed":
+      return "失败";
+    case "skipped":
+      return "未运行";
   }
 }

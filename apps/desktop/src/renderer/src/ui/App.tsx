@@ -51,6 +51,12 @@ interface ProgressSnapshot {
   totalBytes?: number;
 }
 
+interface JobLogEntry {
+  id: number;
+  level: "debug" | "info" | "warn" | "error";
+  message: string;
+}
+
 const progressGroupLabel: Record<JobProgressGroup, string> = {
   mods: "Mod 下载",
   core: "核心下载",
@@ -97,6 +103,7 @@ export function App() {
   const [jobPhase, setJobPhase] = useState<ConversionPhase>("idle");
   const [jobMessage, setJobMessage] = useState("等待任务");
   const [jobProgressGroups, setJobProgressGroups] = useState<Partial<Record<JobProgressGroup, ProgressSnapshot>>>({});
+  const [jobLogs, setJobLogs] = useState<JobLogEntry[]>([]);
   const [conversionOutput, setConversionOutput] = useState<{
     outputDir: string;
     reportPath: string;
@@ -104,6 +111,7 @@ export function App() {
   } | null>(null);
   const conversionJobIdRef = useRef<string | null>(null);
   const conversionPendingRef = useRef(false);
+  const jobLogRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!window.serverpack) {
@@ -139,6 +147,18 @@ export function App() {
       if (event.type === "phase") {
         setJobPhase(event.phase);
         setJobMessage(event.message);
+        return;
+      }
+
+      if (event.type === "log") {
+        setJobLogs((current) => [
+          ...current.slice(-240),
+          {
+            id: Date.now() + current.length,
+            level: event.level,
+            message: event.message
+          }
+        ]);
         return;
       }
 
@@ -194,6 +214,12 @@ export function App() {
       }
     });
   }, []);
+
+  useEffect(() => {
+    if (jobLogRef.current) {
+      jobLogRef.current.scrollTop = jobLogRef.current.scrollHeight;
+    }
+  }, [jobLogs]);
 
   useEffect(() => {
     let active = true;
@@ -391,6 +417,7 @@ export function App() {
     setJobPhase("analyzing");
     setJobMessage("正在创建转换任务");
     setJobProgressGroups({});
+    setJobLogs([]);
     conversionPendingRef.current = true;
 
     try {
@@ -400,6 +427,10 @@ export function App() {
         settings: {
           ...(settings?.unknownPolicy === undefined ? {} : { unknownPolicy: settings.unknownPolicy }),
           ...(settings?.downloadServerCore === undefined ? {} : { downloadServerCore: settings.downloadServerCore }),
+          testStartScript: Boolean(settings?.downloadServerCore && (settings.testStartScript ?? true)),
+          ...(settings?.startupTestTimeoutSeconds === undefined
+            ? {}
+            : { startupTestTimeoutSeconds: settings.startupTestTimeoutSeconds }),
           ...(settings?.outputZip === undefined ? {} : { outputZip: settings.outputZip }),
           ...(settings?.javaHome === undefined ? {} : { javaHome: settings.javaHome }),
           ...(settings?.modRulesPath === undefined ? {} : { modRulesPath: settings.modRulesPath }),
@@ -451,6 +482,18 @@ export function App() {
       }
 
       const next = await window.serverpack.updateSettings({ downloadServerCore: value });
+      setSettings(next);
+    },
+    [settings]
+  );
+
+  const updateTestStartScript = useCallback(
+    async (value: boolean) => {
+      if (!settings) {
+        return;
+      }
+
+      const next = await window.serverpack.updateSettings({ testStartScript: value });
       setSettings(next);
     },
     [settings]
@@ -734,6 +777,15 @@ export function App() {
                 />
                 <span>直接下载核心</span>
               </label>
+              <label className={settings?.downloadServerCore ? "" : "disabled"}>
+                <input
+                  type="checkbox"
+                  checked={Boolean(settings?.downloadServerCore && (settings?.testStartScript ?? true))}
+                  disabled={!settings?.downloadServerCore}
+                  onChange={(event) => void updateTestStartScript(event.currentTarget.checked)}
+                />
+                <span>启动脚本测试</span>
+              </label>
               <label>
                 <input
                   type="checkbox"
@@ -856,6 +908,22 @@ export function App() {
                     {Object.entries(jobProgressGroups).map(([group, progress]) => (
                       <ProgressBar key={group} group={group as JobProgressGroup} progress={progress} />
                     ))}
+                  </div>
+                )}
+                {jobLogs.length > 0 && (
+                  <div className="job-log-panel">
+                    <div className="job-log-title">
+                      <Terminal size={14} />
+                      <strong>任务日志</strong>
+                    </div>
+                    <div className="job-log-lines" ref={jobLogRef} role="log" aria-live="polite">
+                      {jobLogs.map((line) => (
+                        <p key={line.id} className={line.level}>
+                          <span>{formatLogLevel(line.level)}</span>
+                          <code>{line.message}</code>
+                        </p>
+                      ))}
+                    </div>
                   </div>
                 )}
                 <div className="job-actions">
@@ -1032,18 +1100,19 @@ function ProgressBar({ group, progress }: { group: JobProgressGroup; progress: P
   const countPercent = progress.total > 0 ? Math.round((progress.current / progress.total) * 100) : 0;
   const percent = Math.max(0, Math.min(100, progress.percent ?? countPercent));
   const byteLabel =
-    progress.receivedBytes !== undefined
+    group !== "mods" && progress.receivedBytes !== undefined
       ? progress.totalBytes === undefined
         ? formatBytes(progress.receivedBytes)
         : `${formatBytes(progress.receivedBytes)} / ${formatBytes(progress.totalBytes)}`
       : null;
+  const countLabel = `${progress.current}/${progress.total}`;
 
   return (
     <div className="job-progress-item">
       <div className="job-progress-meta">
         <strong>{progressGroupLabel[group]}</strong>
         <span>{progress.label ?? `${progress.current}/${progress.total}`}</span>
-        <em>{byteLabel ?? `${progress.current}/${progress.total}`}</em>
+        <em>{group === "mods" ? countLabel : byteLabel ?? countLabel}</em>
       </div>
       <div className="job-progress" aria-label={`${progressGroupLabel[group]}进度`}>
         <span style={{ width: `${percent}%` }} />
@@ -1219,6 +1288,8 @@ function phaseLabel(phase: ConversionPhase): string {
       return "决策";
     case "packaging":
       return "写入";
+    case "testing":
+      return "测试";
     case "completed":
       return "完成";
     case "failed":
@@ -1227,6 +1298,19 @@ function phaseLabel(phase: ConversionPhase): string {
       return "取消";
     default:
       return "待机";
+  }
+}
+
+function formatLogLevel(level: JobLogEntry["level"]): string {
+  switch (level) {
+    case "debug":
+      return "DEBUG";
+    case "warn":
+      return "WARN";
+    case "error":
+      return "ERR";
+    default:
+      return "INFO";
   }
 }
 

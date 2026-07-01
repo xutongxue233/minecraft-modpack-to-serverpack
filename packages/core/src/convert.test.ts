@@ -327,6 +327,7 @@ describe("runConversion", () => {
     const outputDir = path.join(dir, "out");
     const serverJar = Buffer.from("server-jar");
     const progressGroups: string[] = [];
+    const logMessages: string[] = [];
 
     await writeZip(inputPath, {
       "modrinth.index.json": JSON.stringify({
@@ -344,7 +345,8 @@ describe("runConversion", () => {
         inputPath,
         outputDir,
         settings: {
-          downloadServerCore: true
+          downloadServerCore: true,
+          testStartScript: true
         }
       },
       {
@@ -381,6 +383,18 @@ describe("runConversion", () => {
           if (event.type === "progress" && event.group) {
             progressGroups.push(event.group);
           }
+          if (event.type === "log") {
+            logMessages.push(event.message);
+          }
+        },
+        startupTestRunner: async ({ onLog }) => {
+          onLog?.("info", "fake startup script reached EULA check");
+          return {
+            enabled: true,
+            status: "passed",
+            exitCode: 1,
+            reason: "启动脚本测试通过：服务端已运行到 EULA 检查。"
+          };
         }
       }
     );
@@ -391,8 +405,14 @@ describe("runConversion", () => {
       status: "installed",
       files: ["server.jar"]
     });
+    expect(result.report.serverpack.startupTest).toMatchObject({
+      enabled: true,
+      status: "passed",
+      exitCode: 1
+    });
     await expect(fs.readFile(result.readmePath, "utf8")).resolves.toContain("服务端核心已准备完成");
     expect(progressGroups).toContain("core");
+    expect(logMessages).toContain("fake startup script reached EULA check");
   });
 });
 

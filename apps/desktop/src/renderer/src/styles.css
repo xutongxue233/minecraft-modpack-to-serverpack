@@ -439,6 +439,10 @@ h2 {
   accent-color: var(--moss);
 }
 
+.switchboard label.disabled {
+  color: rgba(21, 24, 20, 0.44);
+}
+
 .api-key-panel,
 .java-home-panel,
 .rules-panel {
@@ -632,7 +636,8 @@ h2 {
 .job-light.analyzing,
 .job-light.reviewing,
 .job-light.packaging,
-.job-light.verifying {
+.job-light.verifying,
+.job-light.testing {
   background: var(--lapis);
   box-shadow: 0 0 14px rgba(57, 124, 154, 0.48);
 }
@@ -728,6 +733,73 @@ h2 {
   font-size: 12px;
   font-weight: 740;
   background: #f7f1df;
+}
+
+.job-log-panel {
+  display: grid;
+  gap: 6px;
+  min-height: 0;
+  padding: 8px;
+  border: 1px solid rgba(21, 24, 20, 0.18);
+  color: rgba(251, 248, 237, 0.84);
+  background:
+    linear-gradient(90deg, rgba(121, 164, 95, 0.08), transparent 55%),
+    #171b16;
+}
+
+.job-log-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: rgba(251, 248, 237, 0.74);
+  font-size: 12px;
+}
+
+.job-log-title svg {
+  color: var(--moss);
+}
+
+.job-log-lines {
+  display: grid;
+  max-height: 150px;
+  overflow: auto;
+  border: 1px solid rgba(240, 236, 220, 0.1);
+  background: rgba(0, 0, 0, 0.26);
+}
+
+.job-log-lines p {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 7px;
+  border-bottom: 1px solid rgba(240, 236, 220, 0.06);
+  font-family: Consolas, "Cascadia Mono", monospace;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.job-log-lines p:last-child {
+  border-bottom: 0;
+}
+
+.job-log-lines span {
+  color: rgba(121, 164, 95, 0.9);
+}
+
+.job-log-lines code {
+  min-width: 0;
+  color: rgba(251, 248, 237, 0.82);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.job-log-lines p.warn span {
+  color: #d2a05f;
+}
+
+.job-log-lines p.error span {
+  color: #e07569;
 }
 
 .error-box {

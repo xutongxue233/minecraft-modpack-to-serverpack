@@ -66,6 +66,8 @@ export interface ConversionRequestSettings {
   downloadRetry?: number | undefined;
   unknownPolicy?: ConversionSettings["unknownPolicy"] | undefined;
   downloadServerCore?: boolean | undefined;
+  testStartScript?: boolean | undefined;
+  startupTestTimeoutSeconds?: number | undefined;
   outputZip?: boolean | undefined;
   javaHome?: string | undefined;
   modRulesPath?: string | undefined;
@@ -149,6 +151,12 @@ export interface ConversionReport {
       files: string[];
       error?: string;
     };
+    startupTest: {
+      enabled: boolean;
+      status: "skipped" | "passed" | "failed";
+      exitCode?: number | undefined;
+      reason?: string | undefined;
+    };
     zipPath?: string;
   };
   warnings: string[];
@@ -174,6 +182,8 @@ export interface ConversionSettings {
   unknownPolicy: "manual-review" | "include" | "exclude";
   outputMode: "package-only" | "installable-server";
   downloadServerCore: boolean;
+  testStartScript: boolean;
+  startupTestTimeoutSeconds: number;
   outputZip: boolean;
   javaHome?: string;
   modRulesPath?: string;
@@ -196,6 +206,7 @@ export type ConversionPhase =
   | "verifying"
   | "reviewing"
   | "packaging"
+  | "testing"
   | "completed"
   | "failed"
   | "cancelled";
