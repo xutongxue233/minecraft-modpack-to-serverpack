@@ -2,10 +2,14 @@ appId: com.mcsp.converter
 productName: Minecraft Serverpack Tool
 directories:
   output: release
+  buildResources: build
 files:
   - out/**
   - package.json
+  - build/icon.ico
+  - build/ICON_LICENSE.txt
 win:
+  icon: build/icon.ico
   signAndEditExecutable: false
   target:
     - target: nsis

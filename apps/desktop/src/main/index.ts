@@ -41,6 +41,7 @@ const defaultSettings: ConversionSettings = {
 };
 
 async function createWindow(): Promise<void> {
+  const windowIcon = resolveWindowIconPath();
   mainWindow = new BrowserWindow({
     width: 1360,
     height: 900,
@@ -53,6 +54,7 @@ async function createWindow(): Promise<void> {
     fullscreenable: false,
     backgroundColor: "#151814",
     title: "整合包转服务端包工具",
+    ...(windowIcon === undefined ? {} : { icon: windowIcon }),
     webPreferences: {
       preload: resolvePreloadPath(),
       nodeIntegration: false,
@@ -346,6 +348,16 @@ function resolvePreloadPath(): string {
   }
 
   return preloadPath;
+}
+
+function resolveWindowIconPath(): string | undefined {
+  const candidates = [
+    path.join(__dirname, "../../build/icon.ico"),
+    path.join(process.cwd(), "build/icon.ico"),
+    path.join(process.cwd(), "apps/desktop/build/icon.ico")
+  ];
+
+  return candidates.find((candidate) => existsSync(candidate));
 }
 
 type DefinedPatch<T> = {
