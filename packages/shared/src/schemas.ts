@@ -1,5 +1,16 @@
 import { z } from "zod";
 
+const ModDecisionOverrideSchema = z.object({
+  fileName: z.string().min(1),
+  decision: z.enum(["include", "exclude"]),
+  reason: z.string().optional(),
+  pathInPack: z.string().optional(),
+  source: z.enum(["curseforge", "modrinth", "direct", "local"]).optional(),
+  projectId: z.string().optional(),
+  fileId: z.string().optional(),
+  versionId: z.string().optional()
+});
+
 export const AnalyzeRequestSchema = z.object({
   inputPath: z.string().min(1)
 });
@@ -16,7 +27,8 @@ export const ConversionRequestSchema = z.object({
       unknownPolicy: z.enum(["manual-review", "include", "exclude"]).optional(),
       downloadServerCore: z.boolean().optional(),
       outputZip: z.boolean().optional(),
-      javaHome: z.string().optional()
+      javaHome: z.string().optional(),
+      modDecisions: z.array(ModDecisionOverrideSchema).optional()
     })
     .optional()
 });

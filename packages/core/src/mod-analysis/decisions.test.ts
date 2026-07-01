@@ -72,6 +72,30 @@ describe("decideMods", () => {
       }
     ]);
   });
+
+  it("applies user review decisions before automatic rules", () => {
+    const file = modFile("client-only.jar", { server: "unsupported" });
+
+    expect(
+      decideMods([file], {
+        overrides: [
+          {
+            fileName: file.fileName,
+            source: file.source,
+            decision: "include",
+            reason: "服主确认该文件服务端可用"
+          }
+        ]
+      })
+    ).toEqual([
+      {
+        fileName: "client-only.jar",
+        decision: "include",
+        reason: "服主确认该文件服务端可用",
+        source: "user-rule"
+      }
+    ]);
+  });
 });
 
 function modFile(fileName: string, env?: ModFileDescriptor["env"]): ModFileDescriptor {

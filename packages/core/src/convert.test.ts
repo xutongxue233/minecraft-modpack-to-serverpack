@@ -194,6 +194,67 @@ describe("runConversion", () => {
     await expect(fs.readFile(result.reportPath, "utf8")).resolves.toContain('"downloadStatus": "failed"');
   });
 
+  it("uses manual review decisions when writing the serverpack", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "mcsp-convert-user-decision-"));
+    const inputPath = path.join(dir, "pack.mrpack");
+    const outputDir = path.join(dir, "out");
+    const payload = await createJarBuffer({
+      "META-INF/mods.toml": 'modLoader="javafml"\n[[mods]]\nmodId="reviewed"\ndisplayName="Reviewed Mod"\n'
+    });
+
+    await writeZip(inputPath, {
+      "modrinth.index.json": JSON.stringify({
+        formatVersion: 1,
+        name: "Reviewed Pack",
+        dependencies: {
+          minecraft: "1.20.1",
+          fabric: "0.15.11"
+        },
+        files: [
+          {
+            path: "mods/reviewed.jar",
+            hashes: { sha1: hash("sha1", payload) },
+            downloads: ["https://example.invalid/reviewed.jar"]
+          }
+        ]
+      })
+    });
+
+    const result = await runConversion(
+      {
+        inputPath,
+        outputDir,
+        settings: {
+          unknownPolicy: "manual-review",
+          modDecisions: [
+            {
+              fileName: "reviewed.jar",
+              pathInPack: "mods/reviewed.jar",
+              source: "modrinth",
+              decision: "include",
+              reason: "用户复核：测试保留"
+            }
+          ]
+        }
+      },
+      {
+        fetchImpl: async () => new Response(payload)
+      }
+    );
+
+    expect(result.report.summary).toMatchObject({
+      includedFiles: 1,
+      manualReviewFiles: 0
+    });
+    expect(result.report.files[0]).toMatchObject({
+      fileName: "reviewed.jar",
+      decision: "include",
+      decisionReason: "用户复核：测试保留",
+      decisionSource: "user-rule"
+    });
+    await expect(fs.readFile(path.join(result.outputDir, "mods", "reviewed.jar"))).resolves.toEqual(payload);
+  });
+
   it("can download a vanilla server core directly into the serverpack", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "mcsp-convert-core-"));
     const inputPath = path.join(dir, "vanilla.mrpack");

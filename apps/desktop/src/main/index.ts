@@ -243,7 +243,8 @@ function withRuntimeConversionSettings(request: ConversionRequest, settings: Con
       outputZip: request.settings?.outputZip ?? settings.outputZip,
       ...(request.settings?.javaHome !== undefined || settings.javaHome !== undefined
         ? { javaHome: request.settings?.javaHome ?? settings.javaHome }
-        : {})
+        : {}),
+      ...(request.settings?.modDecisions === undefined ? {} : { modDecisions: request.settings.modDecisions })
     }
   };
 }

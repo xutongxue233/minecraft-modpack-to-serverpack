@@ -188,7 +188,8 @@ export async function runConversion(
   emit({ type: "phase", jobId, phase: "reviewing", message: "正在生成服务端 Mod 决策" });
   const decisions = decideMods(analysis.files, {
     unknownPolicy: request.settings?.unknownPolicy ?? "manual-review",
-    metadataByFile: jarMetadataByFile
+    metadataByFile: jarMetadataByFile,
+    overrides: request.settings?.modDecisions ?? []
   });
 
   emit({ type: "phase", jobId, phase: "packaging", message: "正在生成服务端目录、脚本和 overrides" });

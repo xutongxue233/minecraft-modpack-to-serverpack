@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent } from "react";
 import {
   AlertTriangle,
+  Ban,
   Box,
+  Check,
   CheckCircle2,
   Database,
   FileArchive,
@@ -14,6 +16,8 @@ import {
   Minus,
   PackageOpen,
   Play,
+  RotateCcw,
+  Search,
   ShieldCheck,
   Square,
   Terminal,
@@ -26,6 +30,8 @@ import type {
   ConversionSettings,
   InputSelection,
   JobProgressGroup,
+  ModDecisionOverride,
+  ModDecisionValue,
   ModFileDescriptor
 } from "@mcsp/shared";
 
@@ -51,6 +57,26 @@ const progressGroupLabel: Record<JobProgressGroup, string> = {
   package: "打包"
 };
 
+type FinalModDecision = Exclude<ModDecisionValue, "manual-review">;
+type ReviewFilter = "all" | "manual-review" | "include" | "exclude" | "changed";
+
+const reviewFilters: Array<{ value: ReviewFilter; label: string }> = [
+  { value: "all", label: "全部" },
+  { value: "manual-review", label: "待复核" },
+  { value: "include", label: "保留" },
+  { value: "exclude", label: "排除" },
+  { value: "changed", label: "已改" }
+];
+
+interface ModReviewRow {
+  file: ModFileDescriptor;
+  index: number;
+  key: string;
+  automaticDecision: ModDecisionValue;
+  effectiveDecision: ModDecisionValue;
+  userDecision?: FinalModDecision;
+}
+
 export function App() {
   const [input, setInput] = useState<InputSelection | null>(null);
   const [outputDir, setOutputDir] = useState<string>("");
@@ -64,6 +90,9 @@ export function App() {
   const [apiKeyDraft, setApiKeyDraft] = useState("");
   const [apiKeySaving, setApiKeySaving] = useState(false);
   const [settingsMessage, setSettingsMessage] = useState<string | null>(null);
+  const [reviewDecisions, setReviewDecisions] = useState<Record<string, FinalModDecision>>({});
+  const [reviewFilter, setReviewFilter] = useState<ReviewFilter>("all");
+  const [reviewSearch, setReviewSearch] = useState("");
   const [jobPhase, setJobPhase] = useState<ConversionPhase>("idle");
   const [jobMessage, setJobMessage] = useState("等待任务");
   const [jobProgressGroups, setJobProgressGroups] = useState<Partial<Record<JobProgressGroup, ProgressSnapshot>>>({});
@@ -172,6 +201,63 @@ export function App() {
   const analysisWarnings = analysis?.warnings ?? [];
   const targetOutputDir = outputDir || settings?.defaultOutputDir || "";
 
+  const reviewRows = useMemo<ModReviewRow[]>(() => {
+    return (analysis?.files ?? []).map((file, index) => {
+      const key = modFileKey(file, index);
+      const automaticDecision = previewServerDecision(file);
+      const userDecision = reviewDecisions[key];
+      return {
+        file,
+        index,
+        key,
+        automaticDecision,
+        effectiveDecision: userDecision ?? automaticDecision,
+        ...(userDecision === undefined ? {} : { userDecision })
+      };
+    });
+  }, [analysis?.files, reviewDecisions]);
+
+  const reviewSummary = useMemo(() => {
+    return {
+      include: reviewRows.filter((row) => row.effectiveDecision === "include").length,
+      exclude: reviewRows.filter((row) => row.effectiveDecision === "exclude").length,
+      manualReview: reviewRows.filter((row) => row.effectiveDecision === "manual-review").length,
+      changed: reviewRows.filter((row) => row.userDecision !== undefined).length
+    };
+  }, [reviewRows]);
+
+  const filteredReviewRows = useMemo(() => {
+    const query = reviewSearch.trim().toLowerCase();
+    return reviewRows.filter((row) => {
+      const matchesFilter =
+        reviewFilter === "all" ||
+        (reviewFilter === "changed" && row.userDecision !== undefined) ||
+        row.effectiveDecision === reviewFilter;
+      if (!matchesFilter) {
+        return false;
+      }
+      if (!query) {
+        return true;
+      }
+      const haystack = [
+        row.file.fileName,
+        row.file.name,
+        row.file.slug,
+        row.file.projectId,
+        row.file.fileId,
+        row.file.versionId,
+        row.file.pathInPack,
+        row.file.source
+      ]
+        .filter((value): value is string => typeof value === "string" && value.length > 0)
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [reviewFilter, reviewRows, reviewSearch]);
+
+  const manualReviewCount = reviewSummary.manualReview;
+
   const selectedPath = useMemo(() => {
     if (!input) {
       return "尚未选择整合包";
@@ -196,6 +282,9 @@ export function App() {
   const applyInputSelection = useCallback((selected: InputSelection) => {
     setInput(selected);
     setAnalysis(null);
+    setReviewDecisions({});
+    setReviewFilter("all");
+    setReviewSearch("");
   }, []);
 
   const selectInput = useCallback(async () => {
@@ -233,6 +322,9 @@ export function App() {
     try {
       const result = await window.serverpack.analyzeInput({ inputPath: input.path });
       setAnalysis(result);
+      setReviewDecisions({});
+      setReviewFilter("all");
+      setReviewSearch("");
     } catch (rawError) {
       setError(formatError(rawError));
     } finally {
@@ -247,6 +339,10 @@ export function App() {
     }
     if (!targetOutputDir) {
       setError("请先选择输出目录。");
+      return;
+    }
+    if (manualReviewCount > 0) {
+      setError(`还有 ${manualReviewCount} 个 Mod 需要复核，请先选择保留或排除。`);
       return;
     }
 
@@ -266,7 +362,10 @@ export function App() {
           ...(settings?.unknownPolicy === undefined ? {} : { unknownPolicy: settings.unknownPolicy }),
           ...(settings?.downloadServerCore === undefined ? {} : { downloadServerCore: settings.downloadServerCore }),
           ...(settings?.outputZip === undefined ? {} : { outputZip: settings.outputZip }),
-          ...(settings?.javaHome === undefined ? {} : { javaHome: settings.javaHome })
+          ...(settings?.javaHome === undefined ? {} : { javaHome: settings.javaHome }),
+          ...(reviewRows.some((row) => row.userDecision !== undefined)
+            ? { modDecisions: reviewRows.filter(hasUserDecision).map(toDecisionOverride) }
+            : {})
         }
       });
       if (conversionPendingRef.current) {
@@ -283,7 +382,7 @@ export function App() {
       setJobMessage("任务创建失败");
       setError(formatError(rawError));
     }
-  }, [input, settings, targetOutputDir]);
+  }, [input, manualReviewCount, reviewRows, settings, targetOutputDir]);
 
   const cancelConversion = useCallback(async () => {
     if (!conversionJobId) {
@@ -352,6 +451,41 @@ export function App() {
       setError(formatError(rawError));
     }
   }, [settings]);
+
+  const updateReviewDecision = useCallback((key: string, decision: FinalModDecision | null) => {
+    setReviewDecisions((current) => {
+      const next = { ...current };
+      if (decision === null) {
+        delete next[key];
+      } else {
+        next[key] = decision;
+      }
+      return next;
+    });
+  }, []);
+
+  const applyBulkDecision = useCallback(
+    (decision: FinalModDecision) => {
+      const keys = filteredReviewRows
+        .filter((row) => row.effectiveDecision === "manual-review" || row.userDecision !== undefined)
+        .map((row) => row.key);
+      if (keys.length === 0) {
+        return;
+      }
+      setReviewDecisions((current) => {
+        const next = { ...current };
+        for (const key of keys) {
+          next[key] = decision;
+        }
+        return next;
+      });
+    },
+    [filteredReviewRows]
+  );
+
+  const resetReviewDecisions = useCallback(() => {
+    setReviewDecisions({});
+  }, []);
 
   const saveCurseForgeApiKey = useCallback(async () => {
     const nextKey = apiKeyDraft.trim();
@@ -508,6 +642,13 @@ export function App() {
               选择 packwiz 目录
             </button>
 
+            {analysis && manualReviewCount > 0 && (
+              <div className="review-warning" role="status">
+                <AlertTriangle size={16} />
+                <span>{manualReviewCount} 个 Mod 需要复核后才能生成服务端包。</span>
+              </div>
+            )}
+
             <div className="switchboard">
               <label>
                 <input
@@ -597,10 +738,10 @@ export function App() {
                 className="convert-button"
                 type="button"
                 onClick={startConversion}
-                disabled={!input || !targetOutputDir || converting || !bridgeOnline}
+                disabled={!input || !targetOutputDir || converting || !bridgeOnline || manualReviewCount > 0}
               >
                 {converting ? <Loader2 className="spin" size={18} /> : <Play size={18} />}
-                {converting ? "任务运行中" : "生成初版报告"}
+                {converting ? "任务运行中" : manualReviewCount > 0 ? "等待复核完成" : "生成服务端包"}
               </button>
             </div>
 
@@ -690,21 +831,81 @@ export function App() {
             <div className="section-heading">
               <Database size={20} />
               <div>
-                <h2 id="mods-title">Mod 清单预览</h2>
-                <p>展示清单来源和初步服务端决策。</p>
+                <h2 id="mods-title">Mod 复核清单</h2>
+                <p>确认未知 Mod 是否进入服务端包。</p>
               </div>
             </div>
+
+            {analysis && (
+              <div className="review-toolbar" aria-label="Mod 复核工具栏">
+                <div className="review-stats">
+                  <span>保留 {reviewSummary.include}</span>
+                  <span>排除 {reviewSummary.exclude}</span>
+                  <span className={manualReviewCount > 0 ? "attention" : ""}>复核 {manualReviewCount}</span>
+                  <span>已改 {reviewSummary.changed}</span>
+                </div>
+
+                <div className="review-controls">
+                  <label className="review-search">
+                    <Search size={14} />
+                    <input
+                      type="search"
+                      value={reviewSearch}
+                      placeholder="搜索 Mod"
+                      onChange={(event) => setReviewSearch(event.currentTarget.value)}
+                    />
+                  </label>
+
+                  <div className="review-filter" role="tablist" aria-label="复核筛选">
+                    {reviewFilters.map((filter) => (
+                      <button
+                        key={filter.value}
+                        type="button"
+                        className={reviewFilter === filter.value ? "active" : ""}
+                        onClick={() => setReviewFilter(filter.value)}
+                      >
+                        {filter.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="review-bulk-actions">
+                  <button type="button" onClick={() => applyBulkDecision("include")}>
+                    <Check size={14} />
+                    当前保留
+                  </button>
+                  <button type="button" onClick={() => applyBulkDecision("exclude")}>
+                    <Ban size={14} />
+                    当前排除
+                  </button>
+                  <button type="button" onClick={resetReviewDecisions} disabled={reviewSummary.changed === 0}>
+                    <RotateCcw size={14} />
+                    重置
+                  </button>
+                </div>
+              </div>
+            )}
 
             <div className="ledger-table" role="table" aria-label="Mod 清单">
               <div className="ledger-row header" role="row">
                 <span role="columnheader">Mod</span>
                 <span role="columnheader">来源</span>
-                <span role="columnheader">服务端决策</span>
+                <span role="columnheader">自动判断</span>
+                <span role="columnheader">人工复核</span>
               </div>
-              {(analysis?.files ?? []).map((file, index) => (
-                <ModRow key={`${file.fileName}-${index}`} file={file} />
+              {filteredReviewRows.map((row) => (
+                <ModRow
+                  key={row.key}
+                  row={row}
+                  onDecision={(decision) => updateReviewDecision(row.key, decision)}
+                  onReset={() => updateReviewDecision(row.key, null)}
+                />
               ))}
-              {analysis && analysis.files.length === 0 && <div className="empty-line">清单里没有远程 Mod 文件。</div>}
+              {analysis && reviewRows.length === 0 && <div className="empty-line">清单里没有远程 Mod 文件。</div>}
+              {analysis && reviewRows.length > 0 && filteredReviewRows.length === 0 && (
+                <div className="empty-line">没有匹配当前筛选的 Mod。</div>
+              )}
               {!analysis && (
                 <div className="empty-ledger">
                   <PackageOpen size={28} />
@@ -753,21 +954,81 @@ function ProgressBar({ group, progress }: { group: JobProgressGroup; progress: P
   );
 }
 
-function ModRow({ file }: { file: ModFileDescriptor }) {
-  const decision = previewServerDecision(file);
-
+function ModRow({
+  row,
+  onDecision,
+  onReset
+}: {
+  row: ModReviewRow;
+  onDecision: (decision: FinalModDecision) => void;
+  onReset: () => void;
+}) {
   return (
     <div className="ledger-row" role="row">
-      <span role="cell" title={file.fileName}>
-        <strong>{file.fileName}</strong>
-        {file.name && file.name !== file.fileName && <small>{file.name}</small>}
+      <span role="cell" title={row.file.fileName}>
+        <strong>{row.file.fileName}</strong>
+        {row.file.name && row.file.name !== row.file.fileName && <small>{row.file.name}</small>}
       </span>
-      <span role="cell">{file.source}</span>
-      <span role="cell" className={`decision-cell ${decision}`}>
-        {decisionLabel(decision)}
+      <span role="cell">{row.file.source}</span>
+      <span role="cell" className={`decision-cell ${row.automaticDecision}`}>
+        {decisionLabel(row.automaticDecision)}
+      </span>
+      <span role="cell" className={`review-cell ${row.userDecision ? "changed" : ""}`}>
+        <button
+          className={row.effectiveDecision === "include" ? "active include" : ""}
+          type="button"
+          title="保留到服务端包"
+          onClick={() => onDecision("include")}
+        >
+          <Check size={13} />
+          保留
+        </button>
+        <button
+          className={row.effectiveDecision === "exclude" ? "active exclude" : ""}
+          type="button"
+          title="从服务端包排除"
+          onClick={() => onDecision("exclude")}
+        >
+          <Ban size={13} />
+          排除
+        </button>
+        {row.userDecision && (
+          <button className="reset" type="button" title="恢复自动判断" onClick={onReset}>
+            <RotateCcw size={13} />
+          </button>
+        )}
       </span>
     </div>
   );
+}
+
+function hasUserDecision(row: ModReviewRow): row is ModReviewRow & { userDecision: FinalModDecision } {
+  return row.userDecision !== undefined;
+}
+
+function toDecisionOverride(row: ModReviewRow & { userDecision: FinalModDecision }): ModDecisionOverride {
+  return {
+    fileName: row.file.fileName,
+    decision: row.userDecision,
+    reason: `用户复核：${decisionLabel(row.userDecision)}`,
+    ...(row.file.pathInPack === undefined ? {} : { pathInPack: row.file.pathInPack }),
+    source: row.file.source,
+    ...(row.file.projectId === undefined ? {} : { projectId: row.file.projectId }),
+    ...(row.file.fileId === undefined ? {} : { fileId: row.file.fileId }),
+    ...(row.file.versionId === undefined ? {} : { versionId: row.file.versionId })
+  };
+}
+
+function modFileKey(file: ModFileDescriptor, index: number): string {
+  return [
+    index,
+    file.source,
+    file.pathInPack ?? "",
+    file.projectId ?? "",
+    file.fileId ?? "",
+    file.versionId ?? "",
+    file.fileName
+  ].join("|");
 }
 
 function compactPath(value: string, maxLength: number): string {

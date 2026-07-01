@@ -44,6 +44,17 @@ export interface ModDecision {
   source: "manifest" | "platform-api" | "jar-metadata" | "builtin-rule" | "user-rule" | "unknown";
 }
 
+export interface ModDecisionOverride {
+  fileName: string;
+  decision: Exclude<ModDecisionValue, "manual-review">;
+  reason?: string | undefined;
+  pathInPack?: string | undefined;
+  source?: ModFileDescriptor["source"] | undefined;
+  projectId?: string | undefined;
+  fileId?: string | undefined;
+  versionId?: string | undefined;
+}
+
 export interface AnalyzeRequest {
   inputPath: string;
 }
@@ -57,6 +68,7 @@ export interface ConversionRequestSettings {
   downloadServerCore?: boolean | undefined;
   outputZip?: boolean | undefined;
   javaHome?: string | undefined;
+  modDecisions?: ModDecisionOverride[] | undefined;
 }
 
 export interface ConversionRequest {
