@@ -1,7 +1,9 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import type { ModFileDescriptor } from "@mcsp/shared";
 import { describe, expect, it } from "vitest";
+import { decideMods } from "./decisions";
 import { loadModDecisionRules, loadRemoteModDecisionRules } from "./user-rules";
 
 describe("loadModDecisionRules", () => {
@@ -177,4 +179,46 @@ describe("loadModDecisionRules", () => {
     ]);
     expect(second).toEqual(first);
   });
+
+  it("excludes known Forge client-only mods from the bundled project rules", async () => {
+    const rules = await loadModDecisionRules(path.resolve("rules/client-mod-rules.json"), {
+      loader: "forge",
+      minecraftVersion: "1.20.1"
+    });
+    const files = [
+      modFile("oculus-mc1.20.1-1.8.0.jar"),
+      modFile("blur-forge-3.1.1.jar"),
+      modFile("jecharacters-1.20.1-forge-4.6.1.jar")
+    ];
+    const metadataByFile = new Map(
+      files.map((file) => [
+        file,
+        {
+          modId: file.id!,
+          source: "mods.toml" as const
+        }
+      ])
+    );
+
+    expect(decideMods(files, { overrides: rules, metadataByFile })).toEqual([
+      expect.objectContaining({ fileName: "oculus-mc1.20.1-1.8.0.jar", decision: "exclude", source: "user-rule" }),
+      expect.objectContaining({ fileName: "blur-forge-3.1.1.jar", decision: "exclude", source: "user-rule" }),
+      expect.objectContaining({
+        fileName: "jecharacters-1.20.1-forge-4.6.1.jar",
+        decision: "exclude",
+        source: "user-rule"
+      })
+    ]);
+  });
 });
+
+function modFile(fileName: string): ModFileDescriptor {
+  const id = fileName.split("-")[0]!;
+  return {
+    id,
+    fileName,
+    source: "curseforge",
+    downloadUrls: [],
+    expectedHashes: {}
+  };
+}

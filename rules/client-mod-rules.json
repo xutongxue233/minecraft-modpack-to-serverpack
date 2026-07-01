@@ -26,6 +26,38 @@
         "slugs": ["sodium"]
       },
       "loaders": ["fabric", "quilt"]
+    },
+    {
+      "id": "oculus",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "Forge 客户端渲染/Shader Mod，服务端加载会引用 client-only 类。",
+      "match": {
+        "modIds": ["oculus"],
+        "slugs": ["oculus"]
+      },
+      "loaders": ["forge", "neoforge"]
+    },
+    {
+      "id": "blur",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "客户端界面背景模糊 Mod，不应进入服务端。",
+      "match": {
+        "modIds": ["blur"],
+        "slugs": ["blur"]
+      }
+    },
+    {
+      "id": "jecharacters",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "Just Enough Characters 依赖客户端搜索树，不应进入服务端。",
+      "match": {
+        "modIds": ["jecharacters"],
+        "slugs": ["just-enough-characters", "jecharacters"]
+      },
+      "loaders": ["forge", "neoforge", "fabric", "quilt"]
     }
   ]
 }
