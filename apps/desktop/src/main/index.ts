@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from "electron";
 import {
   AnalyzeRequestSchema,
   ConversionRequestSchema,
@@ -13,15 +13,9 @@ import {
   ConversionRequest,
   ConversionSettings,
   SettingsUpdateRequest,
-  type PackMetadata,
   unknownToAppError
 } from "@mcsp/shared";
-import {
-  defaultRemoteModRulesUrl,
-  loadModDecisionRules,
-  loadRemoteModDecisionRules,
-  ruleContextFromMetadata
-} from "@mcsp/core";
+import { defaultRemoteModRulesUrl } from "@mcsp/core";
 import { WorkerJobManager } from "./worker-job-manager";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -29,8 +23,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
 let jobManager: WorkerJobManager | null = null;
 
-type StoredSettings = Partial<Omit<ConversionSettings, "curseForgeApiKeyConfigured">> & {
+type StoredSettings = Partial<
+  Omit<ConversionSettings, "curseForgeApiKeyConfigured" | "modRulesPath" | "remoteRulesEnabled" | "remoteRulesUrl">
+> & {
   curseForgeApiKey?: string;
+  curseForgeApiKeyEncrypted?: string;
 };
 
 const defaultSettings: ConversionSettings = {
@@ -39,7 +36,7 @@ const defaultSettings: ConversionSettings = {
   downloadRetry: 3,
   maxExpandedSizeBytes: 4 * 1024 * 1024 * 1024,
   maxFileCount: 20_000,
-  unknownPolicy: "manual-review",
+  unknownPolicy: "include",
   outputMode: "package-only",
   downloadServerCore: false,
   testStartScript: true,
@@ -47,6 +44,7 @@ const defaultSettings: ConversionSettings = {
   remoteRulesEnabled: true,
   remoteRulesUrl: defaultRemoteModRulesUrl,
   outputZip: false,
+  generateOptimizedStartScript: false,
   theme: "system",
   curseForgeApiKeyConfigured: false
 };
@@ -141,19 +139,6 @@ function registerIpc(): void {
     return result.canceled ? null : (result.filePaths[0] ?? null);
   });
 
-  ipcMain.handle("dialog:select-mod-rules-file", async () => {
-    const result = await dialog.showOpenDialog({
-      title: "选择 Mod 规则文件",
-      properties: ["openFile"],
-      filters: [
-        { name: "Mod 规则文件", extensions: ["json", "yaml", "yml"] },
-        { name: "全部文件", extensions: ["*"] }
-      ]
-    });
-
-    return result.canceled ? null : (result.filePaths[0] ?? null);
-  });
-
   ipcMain.handle("job:analyze", async (_event, rawRequest) => {
     try {
       const request = AnalyzeRequestSchema.parse(rawRequest);
@@ -192,32 +177,6 @@ function registerIpc(): void {
       return toPublicSettings(next);
     } catch (error) {
       throw unknownToAppError(error, "E_SETTINGS_UPDATE_FAILED");
-    }
-  });
-
-  ipcMain.handle("rules:load", async (_event, rawRequest) => {
-    try {
-      const request = OpenPathRequestSchema.parse(rawRequest);
-      return await loadModDecisionRules(normalizeModRulesPath(request.path));
-    } catch (error) {
-      throw unknownToAppError(error, "E_RULES_LOAD_FAILED");
-    }
-  });
-
-  ipcMain.handle("rules:load-remote", async (_event, rawRequest) => {
-    try {
-      const metadata = normalizePackMetadata(rawRequest);
-      const settings = await readSettings();
-      if (!settings.remoteRulesEnabled) {
-        return [];
-      }
-      return await loadRemoteModDecisionRules({
-        url: settings.remoteRulesUrl,
-        cacheDir: path.join(app.getPath("userData"), "cache", "rules"),
-        context: ruleContextFromMetadata(metadata)
-      });
-    } catch (error) {
-      throw unknownToAppError(error, "E_REMOTE_RULES_LOAD_FAILED");
     }
   });
 
@@ -262,11 +221,25 @@ async function readSettings(): Promise<ConversionSettings> {
 
 async function readStoredSettings(): Promise<StoredSettings> {
   const filePath = settingsPath();
+  let parsed: StoredSettings;
   try {
     const text = await fs.readFile(filePath, "utf8");
-    return JSON.parse(text) as StoredSettings;
+    parsed = JSON.parse(text) as StoredSettings;
   } catch {
     return {};
+  }
+
+  try {
+    const migrated = migrateStoredSecrets(parsed);
+    if (migrated.changed) {
+      await writeStoredSettings(migrated.settings);
+    }
+    return migrated.settings;
+  } catch {
+    const sanitized = { ...parsed };
+    delete sanitized.curseForgeApiKey;
+    await writeStoredSettings(sanitized).catch(() => undefined);
+    return sanitized;
   }
 }
 
@@ -292,39 +265,40 @@ function withRuntimeConversionSettings(request: ConversionRequest, settings: Con
       downloadServerCore: request.settings?.downloadServerCore ?? settings.downloadServerCore,
       testStartScript: request.settings?.testStartScript ?? settings.testStartScript,
       startupTestTimeoutSeconds: request.settings?.startupTestTimeoutSeconds ?? settings.startupTestTimeoutSeconds,
-      remoteRulesEnabled: request.settings?.remoteRulesEnabled ?? settings.remoteRulesEnabled,
-      remoteRulesUrl: request.settings?.remoteRulesUrl ?? settings.remoteRulesUrl,
+      remoteRulesEnabled: true,
+      remoteRulesUrl: defaultRemoteModRulesUrl,
       remoteRulesCacheDir:
         request.settings?.remoteRulesCacheDir ?? path.join(app.getPath("userData"), "cache", "rules"),
       outputZip: request.settings?.outputZip ?? settings.outputZip,
+      generateOptimizedStartScript:
+        request.settings?.generateOptimizedStartScript ?? settings.generateOptimizedStartScript,
       ...(request.settings?.javaHome !== undefined || settings.javaHome !== undefined
         ? { javaHome: request.settings?.javaHome ?? settings.javaHome }
-        : {}),
-      ...(request.settings?.modRulesPath !== undefined || settings.modRulesPath !== undefined
-        ? { modRulesPath: request.settings?.modRulesPath ?? settings.modRulesPath }
-        : {}),
-      ...(request.settings?.modDecisions === undefined ? {} : { modDecisions: request.settings.modDecisions })
+        : {})
     }
   };
 }
 
-function normalizePackMetadata(raw: unknown): PackMetadata {
-  if (typeof raw !== "object" || raw === null) {
-    throw appError("E_INVALID_METADATA", "远程规则加载缺少整合包元数据。", { recoverable: true });
-  }
-  const metadata = raw as Partial<PackMetadata>;
-  if (!metadata.type || !metadata.name) {
-    throw appError("E_INVALID_METADATA", "整合包元数据不完整，无法加载远程规则。", { recoverable: true });
-  }
-  return metadata as PackMetadata;
-}
-
 function toPublicSettings(stored: StoredSettings): ConversionSettings {
-  const { curseForgeApiKey: _secret, ...publicStored } = stored;
+  const {
+    curseForgeApiKey: _secret,
+    curseForgeApiKeyEncrypted: _encryptedSecret,
+    modRulesPath: _modRulesPath,
+    remoteRulesEnabled: _remoteRulesEnabled,
+    remoteRulesUrl: _remoteRulesUrl,
+    ...publicStored
+  } = stored as StoredSettings & {
+    modRulesPath?: string;
+    remoteRulesEnabled?: boolean;
+    remoteRulesUrl?: string;
+  };
   return withRuntimeSettingsState({
     ...defaultSettings,
     defaultOutputDir: app.getPath("desktop"),
-    ...publicStored
+    ...publicStored,
+    remoteRulesEnabled: true,
+    remoteRulesUrl: defaultRemoteModRulesUrl,
+    unknownPolicy: normalizeUnknownPolicy(publicStored.unknownPolicy)
   });
 }
 
@@ -333,18 +307,33 @@ function mergeStoredSettings(current: StoredSettings, patch: SettingsUpdateReque
     curseForgeApiKey,
     curseForgeApiKeyConfigured: _configured,
     javaHome,
-    modRulesPath,
+    modRulesPath: _modRulesPath,
+    remoteRulesEnabled: _remoteRulesEnabled,
+    remoteRulesUrl: _remoteRulesUrl,
     ...publicPatch
   } = patch as SettingsUpdateRequest & {
     curseForgeApiKeyConfigured?: boolean;
+    remoteRulesEnabled?: boolean;
+    remoteRulesUrl?: string;
   };
   const next = mergeDefined(current, publicPatch);
+  next.unknownPolicy = normalizeUnknownPolicy(next.unknownPolicy);
+  const normalizedNext = next as StoredSettings & {
+    modRulesPath?: string;
+    remoteRulesEnabled?: boolean;
+    remoteRulesUrl?: string;
+  };
+  delete normalizedNext.modRulesPath;
+  delete normalizedNext.remoteRulesEnabled;
+  delete normalizedNext.remoteRulesUrl;
   if (curseForgeApiKey !== undefined) {
     const normalized = curseForgeApiKey?.trim() ?? "";
     if (normalized) {
-      next.curseForgeApiKey = normalized;
+      next.curseForgeApiKeyEncrypted = encryptSecret(normalized);
+      delete next.curseForgeApiKey;
     } else {
       delete next.curseForgeApiKey;
+      delete next.curseForgeApiKeyEncrypted;
     }
   }
   if (javaHome !== undefined) {
@@ -353,14 +342,6 @@ function mergeStoredSettings(current: StoredSettings, patch: SettingsUpdateReque
       next.javaHome = normalized;
     } else {
       delete next.javaHome;
-    }
-  }
-  if (modRulesPath !== undefined) {
-    const normalized = normalizeModRulesPath(modRulesPath);
-    if (normalized) {
-      next.modRulesPath = normalized;
-    } else {
-      delete next.modRulesPath;
     }
   }
   return next;
@@ -383,32 +364,12 @@ function normalizeJavaHome(javaHome: string | null): string | undefined {
   return normalized;
 }
 
-function normalizeModRulesPath(modRulesPath: string | null): string | undefined {
-  const normalized = modRulesPath?.trim() ?? "";
-  if (!normalized) {
-    return undefined;
-  }
-
-  const extension = path.extname(normalized).toLowerCase();
-  if (extension !== ".json" && extension !== ".yaml" && extension !== ".yml") {
-    throw appError("E_INVALID_MOD_RULES_FILE", "选择的 Mod 规则文件格式不受支持。", {
-      detail: { modRulesPath: normalized },
-      suggestion: "请选择 .json、.yaml 或 .yml 文件。"
-    });
-  }
-
-  if (!existsSync(normalized)) {
-    throw appError("E_INVALID_MOD_RULES_FILE", "选择的 Mod 规则文件不存在。", {
-      detail: { modRulesPath: normalized },
-      suggestion: "请选择本机存在的规则文件。"
-    });
-  }
-
-  return normalized;
+function normalizeUnknownPolicy(value: unknown): ConversionSettings["unknownPolicy"] {
+  return value === "exclude" ? "exclude" : "include";
 }
 
 function applyCurseForgeApiKeyToEnv(settings: StoredSettings): void {
-  const key = settings.curseForgeApiKey?.trim();
+  const key = readStoredSecret(settings)?.trim();
   if (key) {
     process.env.CURSEFORGE_API_KEY = key;
   } else if (!process.env.CF_API_KEY?.trim()) {
@@ -419,8 +380,53 @@ function applyCurseForgeApiKeyToEnv(settings: StoredSettings): void {
 function withRuntimeSettingsState(settings: ConversionSettings): ConversionSettings {
   return {
     ...settings,
-    curseForgeApiKeyConfigured: Boolean(settings.curseForgeApiKeyConfigured || process.env.CURSEFORGE_API_KEY?.trim() || process.env.CF_API_KEY?.trim())
+    unknownPolicy: normalizeUnknownPolicy(settings.unknownPolicy),
+    curseForgeApiKeyConfigured: Boolean(
+      settings.curseForgeApiKeyConfigured ||
+        readStoredSecret(settings)?.trim() ||
+        process.env.CURSEFORGE_API_KEY?.trim() ||
+        process.env.CF_API_KEY?.trim()
+    )
   };
+}
+
+function migrateStoredSecrets(settings: StoredSettings): { settings: StoredSettings; changed: boolean } {
+  const next = { ...settings };
+  const legacyKey = next.curseForgeApiKey?.trim();
+  if (!legacyKey) {
+    if ("curseForgeApiKey" in next) {
+      delete next.curseForgeApiKey;
+      return { settings: next, changed: true };
+    }
+    return { settings: next, changed: false };
+  }
+
+  next.curseForgeApiKeyEncrypted = encryptSecret(legacyKey);
+  delete next.curseForgeApiKey;
+  return { settings: next, changed: true };
+}
+
+function encryptSecret(value: string): string {
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw appError("E_SECRET_STORAGE_UNAVAILABLE", "当前系统不可用安全密钥存储，无法保存 CurseForge API Key。", {
+      suggestion: "请使用环境变量 CF_API_KEY/CURSEFORGE_API_KEY，或在支持系统加密存储的环境中运行桌面程序。"
+    });
+  }
+
+  return safeStorage.encryptString(value).toString("base64");
+}
+
+function readStoredSecret(settings: StoredSettings): string | undefined {
+  const encrypted = settings.curseForgeApiKeyEncrypted?.trim();
+  if (!encrypted) {
+    return settings.curseForgeApiKey?.trim() || undefined;
+  }
+
+  try {
+    return safeStorage.decryptString(Buffer.from(encrypted, "base64")).trim() || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function lockWindowZoom(window: BrowserWindow): void {

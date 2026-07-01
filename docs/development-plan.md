@@ -17,7 +17,7 @@ MVP 目标：
 - 交付 Windows 10/11 桌面程序。
 - 使用 Electron + TypeScript + React + Node Worker Threads。
 - 支持 CurseForge `.zip`、Modrinth `.mrpack`、packwiz 目录输入。
-- 完成整合包解析、下载、哈希校验、Mod 服务端筛选、人工复核、overrides 合并、服务端包输出和报告生成。
+- 完成整合包解析、下载、哈希校验、Mod 服务端自动筛选、overrides 合并、服务端包输出和报告生成。
 - 输出目录和 `.zip` 服务端包。
 - 支持 Windows 安装包和 portable 免安装包。
 
@@ -38,7 +38,7 @@ MVP 目标：
 | P0 | 工程骨架 | 建立可运行、可测试、可打包的基础项目。 | Electron 项目、monorepo、基础 IPC、CI 脚本。 |
 | P1 | 核心模型与输入解析 | 统一三类整合包输入，生成分析结果。 | parser、schema、AnalyzeResult、解析 UI。 |
 | P2 | 安全、下载与缓存 | 建立安全文件处理和可恢复下载能力。 | 安全解压、下载器、缓存、哈希校验。 |
-| P3 | Mod 筛选与人工复核 | 判断 Mod 服务端兼容性并支持人工决策。 | JAR 扫描、规则引擎、ReviewPage。 |
+| P3 | Mod 自动筛选 | 判断 Mod 服务端兼容性并支持远程规则库。 | JAR 扫描、规则引擎、规则库文件。 |
 | P4 | 服务端包生成 | 生成可交付的服务端目录、zip 和报告。 | serverpack、README、启动脚本、报告。 |
 | P5 | 桌面体验闭环 | 完成任务向导、进度、日志、设置、失败诊断。 | 完整桌面 MVP 流程。 |
 | P6 | 测试、打包与发布 | 完成回归测试和 Windows 发布物。 | NSIS 安装包、portable 包、发布检查清单。 |
@@ -117,9 +117,9 @@ MVP 目标：
 - 下载失败、哈希失败、API key 缺失都有可诊断错误。
 - UI 能展示下载阶段进度。
 
-### P3：Mod 筛选与人工复核
+### P3：Mod 自动筛选
 
-目标：实现服务端 Mod 决策，并把不确定项交给用户复核。
+目标：实现服务端 Mod 决策，通过远程项目级规则和元数据自动排除客户端 Mod。
 
 | ID | 任务 | 交付物 | 依赖 | 验收标准 |
 | --- | --- | --- | --- | --- |
@@ -127,16 +127,16 @@ MVP 目标：
 | P3-02 | Fabric/Quilt 环境判断 | env 字段映射到 Mod 决策 | P3-01 | `server=unsupported` 默认排除。 |
 | P3-03 | Forge/NeoForge 元数据判断 | `mods.toml`、`neoforge.mods.toml`、`mcmod.info` | P3-01 | 可提取 modId、displayName、版本等基础信息。 |
 | P3-04 | 内置 client-only 规则 | 内置排除/包含规则表 | P3-01 | 典型 client-only Mod 能默认排除。 |
-| P3-05 | 用户规则文件 | YAML/JSON include/exclude 规则 | P1-01 | 用户规则优先级高于内置规则。 |
-| P3-06 | 决策合并器 | manifest env、JAR 元数据、内置规则、用户规则合并 | P3-02、P3-03、P3-04、P3-05 | 每个 Mod 都有 `include/exclude/manual-review` 和 reason。 |
-| P3-07 | ReviewPage | manual-review 表格、搜索、筛选、批量决策 | P3-06 | 未处理 manual-review 时不能继续最终转换。 |
-| P3-08 | 复核决策写入报告 | 用户决策来源记录 | P3-07 | 报告能看到人工包含/排除依据。 |
+| P3-05 | 规则库维护格式 | YAML/JSON include/exclude 规则 | P1-01 | 规则库规则优先级高于内置规则。 |
+| P3-06 | 决策合并器 | manifest env、JAR 元数据、远程规则合并 | P3-02、P3-03、P3-04、P3-05 | 每个 Mod 都有 `include/exclude` 和 reason。 |
+| P3-07 | 远程规则缓存 | GitHub 规则库拉取、缓存和离线回退 | P3-06 | 远程规则不可用时使用本地缓存或自动判断。 |
+| P3-08 | 决策写入报告 | 记录规则来源和判断依据 | P3-06 | 报告能看到规则包含/排除依据。 |
 
 阶段出口：
 
 - Mod 服务端筛选链路完成。
 - 未知 Mod 不会被静默删除。
-- 用户可以在桌面端完成人工复核。
+- 用户可以通过远程规则库控制排除结果。
 
 ### P4：服务端包生成
 
@@ -145,7 +145,7 @@ MVP 目标：
 | ID | 任务 | 交付物 | 依赖 | 验收标准 |
 | --- | --- | --- | --- | --- |
 | P4-01 | 输出目录管理 | 临时目录、最终目录、清理策略 | P2-03 | 取消或失败不会留下半成品最终包。 |
-| P4-02 | mods 输出 | 复制 include Mod 到 `mods/` | P3-06 | exclude/manual-review 未处理项不进入最终 `mods/`。 |
+| P4-02 | mods 输出 | 复制 include Mod 到 `mods/` | P3-06 | exclude 项不进入最终 `mods/`，未知项默认保留并在报告中说明。 |
 | P4-03 | overrides 合并 | CurseForge/Modrinth/packwiz 文件合并 | P2-03、P3-05 | `server-overrides` 覆盖 `overrides`。 |
 | P4-04 | 客户端文件排除 | `options.txt`、`shaderpacks/` 等默认排除 | P4-03 | 客户端专用文件不进入服务端包。 |
 | P4-05 | 启动脚本生成 | `start.bat`、`start.sh` | P1-01 | 脚本包含内存参数、nogui，不硬编码本机路径。 |
@@ -165,7 +165,7 @@ MVP 目标：
 
 | ID | 任务 | 交付物 | 依赖 | 验收标准 |
 | --- | --- | --- | --- | --- |
-| P5-01 | 完整任务向导 | 创建、分析、配置、复核、进度、结果 | P1-P4 | 用户不打开终端即可完成转换。 |
+| P5-01 | 完整任务向导 | 创建、分析、配置、进度、结果 | P1-P4 | 用户不打开终端即可完成转换。 |
 | P5-02 | 配置页 | 默认输出目录、缓存、并发数、日志级别 | P2-05 | 配置保存后重启仍生效。 |
 | P5-03 | API key 管理 | 输入、遮蔽、清除、脱敏传递 | P2-07 | API key 不出现在日志和报告中。 |
 | P5-04 | 日志面板 | 主进程/Worker 日志摘要和导出 | P0-06、P2-08 | 失败时可导出诊断日志。 |
@@ -189,7 +189,7 @@ MVP 目标：
 | P6-01 | 单元测试补齐 | parser、安全路径、hash、规则、报告测试 | P1-P4 | 核心模块有自动化测试。 |
 | P6-02 | 集成测试样本 | 小型 `.mrpack`、CurseForge、packwiz 样本 | P1-P4 | 三类输入可跑通转换。 |
 | P6-03 | 恶意样本测试 | 路径穿越、超大展开、hash mismatch | P2 | 安全失败符合预期且不污染输出目录。 |
-| P6-04 | Electron E2E | Playwright/WebdriverIO 用例 | P5 | 可覆盖导入、复核、取消、成功、失败流程。 |
+| P6-04 | Electron E2E | Playwright/WebdriverIO 用例 | P5 | 可覆盖导入、规则配置、取消、成功、失败流程。 |
 | P6-05 | Windows 打包 | NSIS 安装包、portable 包 | P0-07、P5 | 产物可在干净 Windows 环境启动。 |
 | P6-06 | 发布检查 | 版本号、许可证、依赖、样本、文档 | P6-05 | 发布包不包含缓存、测试样本和敏感配置。 |
 | P6-07 | MVP 验收报告 | 验收结果、已知问题、后续计划 | P6-01 至 P6-06 | 明确是否满足 MVP 发布条件。 |
@@ -235,7 +235,7 @@ flowchart TD
 | FR-007 输出格式 | P4-01、P4-07、P4-08 |
 | FR-008 桌面程序 | P0-02、P1-07、P2-08、P3-07、P5-01 至 P5-08 |
 | FR-009 命令行接口 | MVP 暂缓；通过 `packages/core` 可为 P1 复用 |
-| FR-010 规则文件 | P3-05、P3-06 |
+| FR-010 远程规则库 | P3-05、P3-06 |
 | FR-011 日志与错误处理 | P0-04、P5-04、P5-05 |
 
 ## 8. 测试计划
@@ -265,7 +265,7 @@ flowchart TD
 - CurseForge API key 缺失。
 - 下载失败。
 - hash mismatch。
-- manual-review 未处理。
+- 远程规则加载失败且无本地缓存。
 - 恶意压缩包。
 
 ### 8.3 桌面端 E2E
@@ -277,7 +277,7 @@ MVP 必须覆盖：
 - 拖拽导入。
 - 解析结果展示。
 - 配置项保存与读取。
-- manual-review 搜索、筛选、批量决策。
+- 远程规则库命中和优先级。
 - 转换进度展示。
 - 任务取消。
 - 转换成功后打开输出目录和报告。
@@ -290,7 +290,7 @@ MVP 必须覆盖：
 - Windows 10/11 上可安装或免安装运行。
 - 用户无需终端即可完成一次 `.mrpack` 到服务端 zip 的转换。
 - CurseForge `.zip` 和 packwiz 目录至少通过样本转换验证。
-- 未知 Mod 必须进入人工复核，不能静默删除。
+- 未知 Mod 默认保留，不能静默删除；可通过规则库逐步排除已知客户端 Mod。
 - 生成 `README.md` 和 `conversion-report.json`。
 - 转换失败时保留失败报告或诊断日志。
 - API key 不以明文进入日志、报告和输出包。

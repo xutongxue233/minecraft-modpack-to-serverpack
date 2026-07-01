@@ -45,7 +45,7 @@ export const ConversionRequestSchema = z.object({
       downloadConcurrent: z.number().int().min(1).max(16).optional(),
       downloadTimeoutSeconds: z.number().int().min(5).max(600).optional(),
       downloadRetry: z.number().int().min(0).max(10).optional(),
-      unknownPolicy: z.enum(["manual-review", "include", "exclude"]).optional(),
+      unknownPolicy: z.enum(["include", "exclude"]).optional(),
       downloadServerCore: z.boolean().optional(),
       testStartScript: z.boolean().optional(),
       startupTestTimeoutSeconds: z.number().int().min(5).max(600).optional(),
@@ -53,9 +53,9 @@ export const ConversionRequestSchema = z.object({
       remoteRulesUrl: z.string().url().optional(),
       remoteRulesCacheDir: z.string().optional(),
       outputZip: z.boolean().optional(),
+      generateOptimizedStartScript: z.boolean().optional(),
       javaHome: z.string().optional(),
-      modRulesPath: z.string().optional(),
-      modDecisions: z.array(ModDecisionOverrideSchema).optional()
+      modRulesPath: z.string().optional()
     })
     .optional()
 });
@@ -72,7 +72,7 @@ export const UpdateSettingsRequestSchema = z.object({
   downloadRetry: z.number().int().min(0).max(10).optional(),
   maxExpandedSizeBytes: z.number().int().positive().optional(),
   maxFileCount: z.number().int().positive().optional(),
-  unknownPolicy: z.enum(["manual-review", "include", "exclude"]).optional(),
+  unknownPolicy: z.enum(["include", "exclude"]).optional(),
   outputMode: z.enum(["package-only", "installable-server"]).optional(),
   downloadServerCore: z.boolean().optional(),
   testStartScript: z.boolean().optional(),
@@ -80,6 +80,7 @@ export const UpdateSettingsRequestSchema = z.object({
   remoteRulesEnabled: z.boolean().optional(),
   remoteRulesUrl: z.string().url().optional(),
   outputZip: z.boolean().optional(),
+  generateOptimizedStartScript: z.boolean().optional(),
   javaHome: z.string().nullable().optional(),
   modRulesPath: z.string().nullable().optional(),
   theme: z.enum(["system", "light", "dark"]).optional(),

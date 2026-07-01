@@ -17,6 +17,8 @@ export default defineConfig({
       alias: aliases
     },
     build: {
+      minify: "esbuild",
+      sourcemap: false,
       rollupOptions: {
         input: {
           index: resolve(__dirname, "src/main/index.ts"),
@@ -30,6 +32,8 @@ export default defineConfig({
       alias: aliases
     },
     build: {
+      minify: "esbuild",
+      sourcemap: false,
       rollupOptions: {
         input: {
           index: resolve(__dirname, "src/preload/index.ts")
@@ -46,6 +50,10 @@ export default defineConfig({
     resolve: {
       alias: aliases
     },
-    plugins: [react()]
+    plugins: [react()],
+    build: {
+      minify: "esbuild",
+      sourcemap: false
+    }
   }
 });

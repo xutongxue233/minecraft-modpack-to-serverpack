@@ -111,7 +111,13 @@ export class WorkerJobManager {
 
     const fail = (error: AppError): void => {
       cleanup();
-      this.emitToRenderer("job:event", { type: "failed", jobId: message.id, error });
+      const reportPath = reportPathFromError(error);
+      this.emitToRenderer("job:event", {
+        type: "failed",
+        jobId: message.id,
+        error,
+        ...(reportPath === undefined ? {} : { reportPath })
+      });
       void worker.terminate();
     };
 
@@ -155,4 +161,14 @@ export class WorkerJobManager {
     worker.on("exit", onExit);
     worker.postMessage(message);
   }
+}
+
+function reportPathFromError(error: AppError): string | undefined {
+  const detail = error.detail;
+  if (typeof detail !== "object" || detail === null || Array.isArray(detail)) {
+    return undefined;
+  }
+
+  const reportPath = (detail as { reportPath?: unknown }).reportPath;
+  return typeof reportPath === "string" && reportPath.trim().length > 0 ? reportPath : undefined;
 }

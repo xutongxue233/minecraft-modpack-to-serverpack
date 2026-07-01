@@ -24,6 +24,25 @@ describe("runServerpackStartupTest", () => {
     expect(logs.join("\n")).toContain("EULA");
     await expect(fs.readFile(path.join(dir, "eula.txt"), "utf8")).resolves.toBe("eula=true\n");
   });
+
+  it("prefers optimized startup scripts when they are present", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "mcsp-startup-test-optimized-"));
+    await writeFailingRegularStartScript(dir);
+    await writeFakeOptimizedStartScript(dir);
+    const logs: string[] = [];
+
+    const result = await runServerpackStartupTest({
+      outputDir: dir,
+      timeoutSeconds: 5,
+      onLog: (_level, message) => logs.push(message)
+    });
+
+    expect(result).toMatchObject({
+      enabled: true,
+      status: "passed"
+    });
+    expect(logs.join("\n")).toContain(process.platform === "win32" ? "start-optimized.bat" : "start-optimized.sh");
+  });
 });
 
 async function writeFakeStartScript(dir: string): Promise<void> {
@@ -37,6 +56,51 @@ async function writeFakeStartScript(dir: string): Promise<void> {
   }
 
   const scriptPath = path.join(dir, "start.sh");
+  await fs.writeFile(
+    scriptPath,
+    [
+      "#!/usr/bin/env bash",
+      "echo 'You need to agree to the EULA in order to run the server.'",
+      "exit 1",
+      ""
+    ].join("\n"),
+    "utf8"
+  );
+  await fs.chmod(scriptPath, 0o755);
+}
+
+async function writeFailingRegularStartScript(dir: string): Promise<void> {
+  if (process.platform === "win32") {
+    await fs.writeFile(
+      path.join(dir, "start.bat"),
+      ["@echo off", "echo regular script should not run", "exit /b 2", ""].join("\r\n"),
+      "utf8"
+    );
+    return;
+  }
+
+  const scriptPath = path.join(dir, "start.sh");
+  await fs.writeFile(
+    scriptPath,
+    ["#!/usr/bin/env bash", "echo 'regular script should not run'", "exit 2", ""].join("\n"),
+    "utf8"
+  );
+  await fs.chmod(scriptPath, 0o755);
+}
+
+async function writeFakeOptimizedStartScript(dir: string): Promise<void> {
+  if (process.platform === "win32") {
+    await fs.writeFile(
+      path.join(dir, "start-optimized.bat"),
+      ["@echo off", "echo You need to agree to the EULA in order to run the server.", "exit /b 1", ""].join(
+        "\r\n"
+      ),
+      "utf8"
+    );
+    return;
+  }
+
+  const scriptPath = path.join(dir, "start-optimized.sh");
   await fs.writeFile(
     scriptPath,
     [

@@ -2,11 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent } from "react";
 import {
   AlertTriangle,
-  Ban,
   Box,
-  Check,
   CheckCircle2,
-  Database,
   FileArchive,
   FileText,
   FolderOpen,
@@ -16,8 +13,6 @@ import {
   Minus,
   PackageOpen,
   Play,
-  RotateCcw,
-  Search,
   ShieldCheck,
   Square,
   Terminal,
@@ -29,10 +24,7 @@ import type {
   ConversionPhase,
   ConversionSettings,
   InputSelection,
-  JobProgressGroup,
-  ModDecisionOverride,
-  ModDecisionValue,
-  ModFileDescriptor
+  JobProgressGroup
 } from "@mcsp/shared";
 
 const sourceName: Record<string, string> = {
@@ -63,26 +55,6 @@ const progressGroupLabel: Record<JobProgressGroup, string> = {
   package: "打包"
 };
 
-type FinalModDecision = Exclude<ModDecisionValue, "manual-review">;
-type ReviewFilter = "all" | "manual-review" | "include" | "exclude" | "changed";
-
-const reviewFilters: Array<{ value: ReviewFilter; label: string }> = [
-  { value: "all", label: "全部" },
-  { value: "manual-review", label: "待复核" },
-  { value: "include", label: "保留" },
-  { value: "exclude", label: "排除" },
-  { value: "changed", label: "已改" }
-];
-
-interface ModReviewRow {
-  file: ModFileDescriptor;
-  index: number;
-  key: string;
-  automaticDecision: ModDecisionValue;
-  effectiveDecision: ModDecisionValue;
-  userDecision?: FinalModDecision;
-}
-
 export function App() {
   const [input, setInput] = useState<InputSelection | null>(null);
   const [outputDir, setOutputDir] = useState<string>("");
@@ -96,11 +68,6 @@ export function App() {
   const [apiKeyDraft, setApiKeyDraft] = useState("");
   const [apiKeySaving, setApiKeySaving] = useState(false);
   const [settingsMessage, setSettingsMessage] = useState<string | null>(null);
-  const [modRuleOverrides, setModRuleOverrides] = useState<ModDecisionOverride[]>([]);
-  const [remoteRuleOverrides, setRemoteRuleOverrides] = useState<ModDecisionOverride[]>([]);
-  const [reviewDecisions, setReviewDecisions] = useState<Record<string, FinalModDecision>>({});
-  const [reviewFilter, setReviewFilter] = useState<ReviewFilter>("all");
-  const [reviewSearch, setReviewSearch] = useState("");
   const [jobPhase, setJobPhase] = useState<ConversionPhase>("idle");
   const [jobMessage, setJobMessage] = useState("等待任务");
   const [jobProgressGroups, setJobProgressGroups] = useState<Partial<Record<JobProgressGroup, ProgressSnapshot>>>({});
@@ -222,132 +189,72 @@ export function App() {
     }
   }, [jobLogs]);
 
-  useEffect(() => {
-    let active = true;
-    setModRuleOverrides([]);
-
-    const rulesPath = settings?.modRulesPath;
-    if (!rulesPath || !window.serverpack) {
-      return () => {
-        active = false;
-      };
-    }
-
-    void window.serverpack
-      .loadModRules(rulesPath)
-      .then((rules) => {
-        if (active) {
-          setModRuleOverrides(rules);
-        }
-      })
-      .catch((rawError: unknown) => {
-        if (active) {
-          setError(formatError(rawError));
-        }
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [settings?.modRulesPath]);
-
-  useEffect(() => {
-    let active = true;
-    setRemoteRuleOverrides([]);
-
-    if (!analysis || !settings?.remoteRulesEnabled || !window.serverpack) {
-      return () => {
-        active = false;
-      };
-    }
-
-    void window.serverpack
-      .loadRemoteModRules(analysis.metadata)
-      .then((rules) => {
-        if (active) {
-          setRemoteRuleOverrides(rules);
-        }
-      })
-      .catch((rawError: unknown) => {
-        if (active) {
-          setError(formatError(rawError));
-        }
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [analysis, settings?.remoteRulesEnabled, settings?.remoteRulesUrl]);
-
   const totalMods = analysis?.files.length ?? 0;
   const loaderLabel = analysis?.metadata.loader ?? "未识别";
   const packTypeLabel = analysis ? sourceName[analysis.metadata.type] ?? analysis.metadata.type : "等待输入";
   const bridgeOnline = Boolean(window.serverpack);
   const analysisWarnings = analysis?.warnings ?? [];
   const targetOutputDir = outputDir || settings?.defaultOutputDir || "";
-
-  const modRuleIndex = useMemo(
-    () => buildRuleIndex([...remoteRuleOverrides, ...modRuleOverrides]),
-    [modRuleOverrides, remoteRuleOverrides]
-  );
-
-  const reviewRows = useMemo<ModReviewRow[]>(() => {
-    return (analysis?.files ?? []).map((file, index) => {
-      const key = modFileKey(file, index);
-      const automaticDecision =
-        findRuleDecision(file, modRuleIndex) ?? previewServerDecision(file, settings?.unknownPolicy ?? "manual-review");
-      const userDecision = reviewDecisions[key];
-      return {
-        file,
-        index,
-        key,
-        automaticDecision,
-        effectiveDecision: userDecision ?? automaticDecision,
-        ...(userDecision === undefined ? {} : { userDecision })
-      };
-    });
-  }, [analysis?.files, modRuleIndex, reviewDecisions, settings?.unknownPolicy]);
-
-  const reviewSummary = useMemo(() => {
-    return {
-      include: reviewRows.filter((row) => row.effectiveDecision === "include").length,
-      exclude: reviewRows.filter((row) => row.effectiveDecision === "exclude").length,
-      manualReview: reviewRows.filter((row) => row.effectiveDecision === "manual-review").length,
-      changed: reviewRows.filter((row) => row.userDecision !== undefined).length
-    };
-  }, [reviewRows]);
-
-  const filteredReviewRows = useMemo(() => {
-    const query = reviewSearch.trim().toLowerCase();
-    return reviewRows.filter((row) => {
-      const matchesFilter =
-        reviewFilter === "all" ||
-        (reviewFilter === "changed" && row.userDecision !== undefined) ||
-        row.effectiveDecision === reviewFilter;
-      if (!matchesFilter) {
-        return false;
-      }
-      if (!query) {
-        return true;
-      }
-      const haystack = [
-        row.file.fileName,
-        row.file.name,
-        row.file.slug,
-        row.file.projectId,
-        row.file.fileId,
-        row.file.versionId,
-        row.file.pathInPack,
-        row.file.source
-      ]
-        .filter((value): value is string => typeof value === "string" && value.length > 0)
-        .join(" ")
-        .toLowerCase();
-      return haystack.includes(query);
-    });
-  }, [reviewFilter, reviewRows, reviewSearch]);
-
-  const manualReviewCount = reviewSummary.manualReview;
+  const overrideTotal = analysis ? analysis.overrides.common + analysis.overrides.server : 0;
+  const packName = analysis?.metadata.name ?? "等待解析";
+  const minecraftLabel = analysis?.metadata.minecraftVersion ?? "未指定";
+  const loaderSummary =
+    analysis?.metadata.loader === undefined
+      ? "未识别加载器"
+      : `${analysis.metadata.loader}${analysis.metadata.loaderVersion ? ` ${analysis.metadata.loaderVersion}` : ""}`;
+  const ruleModeLabel = "远程规则库";
+  const coreModeLabel = settings?.downloadServerCore ? "直接下载核心" : "生成安装脚本";
+  const outputModeLabel = settings?.outputZip ? "目录 + zip" : "仅输出目录";
+  const optimizedScriptLabel = settings?.generateOptimizedStartScript ? "生成优化脚本" : "标准启动脚本";
+  const blueprintSteps = [
+    {
+      label: "输入",
+      value: input ? "已选择整合包" : "等待导入",
+      tone: input ? "ready" : "idle"
+    },
+    {
+      label: "解析",
+      value: analysis ? `${totalMods} 个远程文件` : input ? "可开始解析" : "等待输入",
+      tone: analysis ? "ready" : input ? "active" : "idle"
+    },
+    {
+      label: "规则",
+      value: ruleModeLabel,
+      tone: "ready"
+    },
+    {
+      label: "输出",
+      value: targetOutputDir ? outputModeLabel : "选择目录",
+      tone: targetOutputDir ? "ready" : "idle"
+    }
+  ] as const;
+  const readinessItems = [
+    {
+      label: "桥接状态",
+      value: bridgeOnline ? "本地桥接可用" : "桥接未加载",
+      state: bridgeOnline ? "ready" : "blocked"
+    },
+    {
+      label: "输入包",
+      value: input ? compactPath(input.path, 48) : "尚未选择",
+      state: input ? "ready" : "idle"
+    },
+    {
+      label: "输出目录",
+      value: targetOutputDir ? compactPath(targetOutputDir, 48) : "尚未选择",
+      state: targetOutputDir ? "ready" : "idle"
+    },
+    {
+      label: "运行核心",
+      value: `${coreModeLabel} / ${optimizedScriptLabel}`,
+      state: "ready"
+    },
+    {
+      label: "Java",
+      value: settings?.javaHome ? "已指定 JDK" : "使用系统 PATH",
+      state: settings?.downloadServerCore && !settings?.javaHome ? "active" : "ready"
+    }
+  ] as const;
 
   const selectedPath = useMemo(() => {
     if (!input) {
@@ -370,19 +277,9 @@ export function App() {
     return compactPath(settings.javaHome, 64);
   }, [settings?.javaHome]);
 
-  const modRulesPath = useMemo(() => {
-    if (!settings?.modRulesPath) {
-      return "未配置，使用自动判断和本次人工复核";
-    }
-    return compactPath(settings.modRulesPath, 64);
-  }, [settings?.modRulesPath]);
-
   const applyInputSelection = useCallback((selected: InputSelection) => {
     setInput(selected);
     setAnalysis(null);
-    setReviewDecisions({});
-    setReviewFilter("all");
-    setReviewSearch("");
   }, []);
 
   const selectInput = useCallback(async () => {
@@ -420,9 +317,6 @@ export function App() {
     try {
       const result = await window.serverpack.analyzeInput({ inputPath: input.path });
       setAnalysis(result);
-      setReviewDecisions({});
-      setReviewFilter("all");
-      setReviewSearch("");
     } catch (rawError) {
       setError(formatError(rawError));
     } finally {
@@ -437,10 +331,6 @@ export function App() {
     }
     if (!targetOutputDir) {
       setError("请先选择输出目录。");
-      return;
-    }
-    if (manualReviewCount > 0) {
-      setError(`还有 ${manualReviewCount} 个 Mod 需要复核，请先选择保留或排除。`);
       return;
     }
 
@@ -458,20 +348,16 @@ export function App() {
         inputPath: input.path,
         outputDir: targetOutputDir,
         settings: {
-          ...(settings?.unknownPolicy === undefined ? {} : { unknownPolicy: settings.unknownPolicy }),
           ...(settings?.downloadServerCore === undefined ? {} : { downloadServerCore: settings.downloadServerCore }),
           testStartScript: Boolean(settings?.downloadServerCore && (settings.testStartScript ?? true)),
           ...(settings?.startupTestTimeoutSeconds === undefined
             ? {}
             : { startupTestTimeoutSeconds: settings.startupTestTimeoutSeconds }),
-          ...(settings?.remoteRulesEnabled === undefined ? {} : { remoteRulesEnabled: settings.remoteRulesEnabled }),
-          ...(settings?.remoteRulesUrl === undefined ? {} : { remoteRulesUrl: settings.remoteRulesUrl }),
           ...(settings?.outputZip === undefined ? {} : { outputZip: settings.outputZip }),
           ...(settings?.javaHome === undefined ? {} : { javaHome: settings.javaHome }),
-          ...(settings?.modRulesPath === undefined ? {} : { modRulesPath: settings.modRulesPath }),
-          ...(reviewRows.some((row) => row.userDecision !== undefined)
-            ? { modDecisions: reviewRows.filter(hasUserDecision).map(toDecisionOverride) }
-            : {})
+          ...(settings?.generateOptimizedStartScript === undefined
+            ? {}
+            : { generateOptimizedStartScript: settings.generateOptimizedStartScript })
         }
       });
       if (conversionPendingRef.current) {
@@ -488,7 +374,7 @@ export function App() {
       setJobMessage("任务创建失败");
       setError(formatError(rawError));
     }
-  }, [input, manualReviewCount, reviewRows, settings, targetOutputDir]);
+  }, [input, settings, targetOutputDir]);
 
   const cancelConversion = useCallback(async () => {
     if (!conversionJobId) {
@@ -534,32 +420,14 @@ export function App() {
     [settings]
   );
 
-  const updateRemoteRulesEnabled = useCallback(
+  const updateGenerateOptimizedStartScript = useCallback(
     async (value: boolean) => {
       if (!settings) {
         return;
       }
 
-      const next = await window.serverpack.updateSettings({ remoteRulesEnabled: value });
+      const next = await window.serverpack.updateSettings({ generateOptimizedStartScript: value });
       setSettings(next);
-    },
-    [settings]
-  );
-
-  const updateUnknownModReview = useCallback(
-    async (value: boolean) => {
-      if (!settings) {
-        return;
-      }
-
-      setError(null);
-      try {
-        const next = await window.serverpack.updateSettings({ unknownPolicy: value ? "manual-review" : "exclude" });
-        setSettings(next);
-        setSettingsMessage(value ? "未知 Mod 将进入人工复核" : "未知 Mod 将默认排除");
-      } catch (rawError) {
-        setError(formatError(rawError));
-      }
     },
     [settings]
   );
@@ -599,77 +467,6 @@ export function App() {
       setError(formatError(rawError));
     }
   }, [settings]);
-
-  const selectModRulesFile = useCallback(async () => {
-    if (!settings) {
-      return;
-    }
-
-    setError(null);
-    setSettingsMessage(null);
-    try {
-      const selected = await window.serverpack.selectModRulesFile();
-      if (!selected) {
-        return;
-      }
-      const next = await window.serverpack.updateSettings({ modRulesPath: selected });
-      setSettings(next);
-      setSettingsMessage("Mod 规则文件已保存");
-    } catch (rawError) {
-      setError(formatError(rawError));
-    }
-  }, [settings]);
-
-  const clearModRulesFile = useCallback(async () => {
-    if (!settings) {
-      return;
-    }
-
-    setError(null);
-    setSettingsMessage(null);
-    try {
-      const next = await window.serverpack.updateSettings({ modRulesPath: null });
-      setSettings(next);
-      setSettingsMessage("Mod 规则文件已清除");
-    } catch (rawError) {
-      setError(formatError(rawError));
-    }
-  }, [settings]);
-
-  const updateReviewDecision = useCallback((key: string, decision: FinalModDecision | null) => {
-    setReviewDecisions((current) => {
-      const next = { ...current };
-      if (decision === null) {
-        delete next[key];
-      } else {
-        next[key] = decision;
-      }
-      return next;
-    });
-  }, []);
-
-  const applyBulkDecision = useCallback(
-    (decision: FinalModDecision) => {
-      const keys = filteredReviewRows
-        .filter((row) => row.effectiveDecision === "manual-review" || row.userDecision !== undefined)
-        .map((row) => row.key);
-      if (keys.length === 0) {
-        return;
-      }
-      setReviewDecisions((current) => {
-        const next = { ...current };
-        for (const key of keys) {
-          next[key] = decision;
-        }
-        return next;
-      });
-    },
-    [filteredReviewRows]
-  );
-
-  const resetReviewDecisions = useCallback(() => {
-    setReviewDecisions({});
-  }, []);
 
   const saveCurseForgeApiKey = useCallback(async () => {
     const nextKey = apiKeyDraft.trim();
@@ -826,13 +623,6 @@ export function App() {
               选择 packwiz 目录
             </button>
 
-            {analysis && manualReviewCount > 0 && (
-              <div className="review-warning" role="status">
-                <AlertTriangle size={16} />
-                <span>{manualReviewCount} 个 Mod 需要复核后才能生成服务端包。</span>
-              </div>
-            )}
-
             <div className="switchboard">
               <label>
                 <input
@@ -854,10 +644,11 @@ export function App() {
               <label>
                 <input
                   type="checkbox"
-                  checked={settings?.remoteRulesEnabled ?? true}
-                  onChange={(event) => void updateRemoteRulesEnabled(event.currentTarget.checked)}
+                  checked={settings?.generateOptimizedStartScript ?? false}
+                  disabled={!settings}
+                  onChange={(event) => void updateGenerateOptimizedStartScript(event.currentTarget.checked)}
                 />
-                <span>远程规则库</span>
+                <span>优化启动脚本</span>
               </label>
               <label>
                 <input
@@ -866,15 +657,6 @@ export function App() {
                   onChange={(event) => void updateOutputZip(event.currentTarget.checked)}
                 />
                 <span>输出 zip</span>
-              </label>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={(settings?.unknownPolicy ?? "manual-review") === "manual-review"}
-                  disabled={!settings}
-                  onChange={(event) => void updateUnknownModReview(event.currentTarget.checked)}
-                />
-                <span>未知 Mod 进入复核</span>
               </label>
             </div>
 
@@ -899,29 +681,6 @@ export function App() {
                 )}
               </div>
               <p className="settings-message">用于直接下载核心时运行 Forge、Fabric、Quilt 安装器。</p>
-            </div>
-
-            <div className="rules-panel">
-              <div className="rules-title">
-                <FileText size={16} />
-                <span>Mod 规则文件</span>
-                <strong className={settings?.modRulesPath ? "configured" : ""}>
-                  {settings?.modRulesPath ? "已启用" : "未启用"}
-                </strong>
-              </div>
-              <div className="rules-row">
-                <output title={settings?.modRulesPath || undefined}>{modRulesPath}</output>
-                <button type="button" onClick={selectModRulesFile}>
-                  <FolderOpen size={15} />
-                  选择规则
-                </button>
-                {settings?.modRulesPath && (
-                  <button className="ghost" type="button" onClick={clearModRulesFile}>
-                    清除
-                  </button>
-                )}
-              </div>
-              <p className="settings-message">支持 JSON/YAML，规则会优先于自动判断；本次人工复核优先级最高。</p>
             </div>
 
             <div className="api-key-panel">
@@ -967,10 +726,10 @@ export function App() {
                 className="convert-button"
                 type="button"
                 onClick={startConversion}
-                disabled={!input || !targetOutputDir || converting || !bridgeOnline || manualReviewCount > 0}
+                disabled={!input || !targetOutputDir || converting || !bridgeOnline}
               >
                 {converting ? <Loader2 className="spin" size={18} /> : <Play size={18} />}
-                {converting ? "任务运行中" : manualReviewCount > 0 ? "等待复核完成" : "生成服务端包"}
+                {converting ? "任务运行中" : "生成服务端包"}
               </button>
             </div>
 
@@ -1048,117 +807,71 @@ export function App() {
             )}
           </section>
 
-          <section className="manifest-board" aria-labelledby="manifest-title">
-            <div className="section-heading">
-              <ShieldCheck size={20} />
-              <div>
-                <h2 id="manifest-title">Manifest 读数</h2>
-                <p>解析后的版本、加载器和 overrides 统计。</p>
+          <section className="overview-board" aria-labelledby="overview-title">
+            <div className="blueprint-hero">
+              <div className="terrain-strip" aria-hidden="true">
+                {blueprintSteps.map((step) => (
+                  <span key={step.label} className={step.tone} />
+                ))}
+              </div>
+              <div className="blueprint-copy">
+                <p className="panel-kicker">Serverpack blueprint</p>
+                <h2 id="overview-title">生成蓝图</h2>
+                <p>
+                  {packName} / {minecraftLabel} / {loaderSummary}
+                </p>
               </div>
             </div>
 
-            <dl className="readout-grid">
-              <Readout label="来源" value={packTypeLabel} />
-              <Readout label="包名" value={analysis?.metadata.name ?? "未解析"} />
-              <Readout label="版本" value={analysis?.metadata.version ?? "未指定"} />
-              <Readout label="Minecraft" value={analysis?.metadata.minecraftVersion ?? "未指定"} />
-              <Readout label="加载器" value={loaderLabel} />
-              <Readout label="加载器版本" value={analysis?.metadata.loaderVersion ?? "未指定"} />
-              <Readout label="远程文件" value={`${totalMods}`} />
-              <Readout
-                label="overrides"
-                value={analysis ? String(analysis.overrides.common + analysis.overrides.server) : "0"}
-              />
-            </dl>
-          </section>
+            <div className="blueprint-steps" aria-label="转换准备状态">
+              {blueprintSteps.map((step) => (
+                <BlueprintStep key={step.label} label={step.label} value={step.value} tone={step.tone} />
+              ))}
+            </div>
 
-          <section className="mod-ledger" aria-labelledby="mods-title">
-            <div className="section-heading">
-              <Database size={20} />
-              <div>
-                <h2 id="mods-title">Mod 复核清单</h2>
-                <p>确认未知 Mod 是否进入服务端包。</p>
+            <div className="overview-section">
+              <div className="overview-section-title">
+                <ShieldCheck size={18} />
+                <div>
+                  <h3>Manifest 读数</h3>
+                  <p>解析后用于选择核心和输出内容。</p>
+                </div>
+              </div>
+              <dl className="readout-grid">
+                <Readout label="来源" value={packTypeLabel} />
+                <Readout label="包名" value={analysis?.metadata.name ?? "未解析"} />
+                <Readout label="版本" value={analysis?.metadata.version ?? "未指定"} />
+                <Readout label="Minecraft" value={minecraftLabel} />
+                <Readout label="加载器" value={loaderLabel} />
+                <Readout label="加载器版本" value={analysis?.metadata.loaderVersion ?? "未指定"} />
+                <Readout label="远程文件" value={`${totalMods}`} />
+                <Readout label="overrides" value={String(overrideTotal)} />
+              </dl>
+            </div>
+
+            <div className="overview-section">
+              <div className="overview-section-title">
+                <Terminal size={18} />
+                <div>
+                  <h3>启动方案</h3>
+                  <p>生成前确认脚本、核心和规则来源。</p>
+                </div>
+              </div>
+              <div className="readiness-list">
+                {readinessItems.map((item) => (
+                  <ReadinessItem key={item.label} label={item.label} value={item.value} state={item.state} />
+                ))}
               </div>
             </div>
 
-            {analysis && (
-              <div className="review-toolbar" aria-label="Mod 复核工具栏">
-                <div className="review-stats">
-                  <span>保留 {reviewSummary.include}</span>
-                  <span>排除 {reviewSummary.exclude}</span>
-                  <span className={manualReviewCount > 0 ? "attention" : ""}>复核 {manualReviewCount}</span>
-                  <span>已改 {reviewSummary.changed}</span>
-                </div>
-
-                <div className="review-controls">
-                  <label className="review-search">
-                    <Search size={14} />
-                    <input
-                      type="search"
-                      value={reviewSearch}
-                      placeholder="搜索 Mod"
-                      onChange={(event) => setReviewSearch(event.currentTarget.value)}
-                    />
-                  </label>
-
-                  <div className="review-filter" role="tablist" aria-label="复核筛选">
-                    {reviewFilters.map((filter) => (
-                      <button
-                        key={filter.value}
-                        type="button"
-                        className={reviewFilter === filter.value ? "active" : ""}
-                        onClick={() => setReviewFilter(filter.value)}
-                      >
-                        {filter.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="review-bulk-actions">
-                  <button type="button" onClick={() => applyBulkDecision("include")}>
-                    <Check size={14} />
-                    当前保留
-                  </button>
-                  <button type="button" onClick={() => applyBulkDecision("exclude")}>
-                    <Ban size={14} />
-                    当前排除
-                  </button>
-                  <button type="button" onClick={resetReviewDecisions} disabled={reviewSummary.changed === 0}>
-                    <RotateCcw size={14} />
-                    重置
-                  </button>
-                </div>
+            {conversionOutput && (
+              <div className="output-receipt">
+                <strong>最近生成</strong>
+                <span>{compactPath(conversionOutput.outputDir, 64)}</span>
               </div>
             )}
-
-            <div className="ledger-table" role="table" aria-label="Mod 清单">
-              <div className="ledger-row header" role="row">
-                <span role="columnheader">Mod</span>
-                <span role="columnheader">来源</span>
-                <span role="columnheader">自动判断</span>
-                <span role="columnheader">人工复核</span>
-              </div>
-              {filteredReviewRows.map((row) => (
-                <ModRow
-                  key={row.key}
-                  row={row}
-                  onDecision={(decision) => updateReviewDecision(row.key, decision)}
-                  onReset={() => updateReviewDecision(row.key, null)}
-                />
-              ))}
-              {analysis && reviewRows.length === 0 && <div className="empty-line">清单里没有远程 Mod 文件。</div>}
-              {analysis && reviewRows.length > 0 && filteredReviewRows.length === 0 && (
-                <div className="empty-line">没有匹配当前筛选的 Mod。</div>
-              )}
-              {!analysis && (
-                <div className="empty-ledger">
-                  <PackageOpen size={28} />
-                  <span>导入整合包后显示 Mod 文件。</span>
-                </div>
-              )}
-            </div>
           </section>
+
         </section>
       </section>
     </main>
@@ -1170,6 +883,43 @@ function Readout({ label, value, wide = false }: { label: string; value: string;
     <div className={wide ? "readout wide" : "readout"}>
       <dt>{label}</dt>
       <dd>{value}</dd>
+    </div>
+  );
+}
+
+function BlueprintStep({
+  label,
+  value,
+  tone
+}: {
+  label: string;
+  value: string;
+  tone: "ready" | "active" | "idle";
+}) {
+  return (
+    <div className={`blueprint-step ${tone}`}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function ReadinessItem({
+  label,
+  value,
+  state
+}: {
+  label: string;
+  value: string;
+  state: "ready" | "active" | "idle" | "blocked";
+}) {
+  return (
+    <div className={`readiness-item ${state}`}>
+      <span aria-hidden="true" />
+      <div>
+        <strong>{label}</strong>
+        <small>{value}</small>
+      </div>
     </div>
   );
 }
@@ -1200,140 +950,6 @@ function ProgressBar({ group, progress }: { group: JobProgressGroup; progress: P
   );
 }
 
-function ModRow({
-  row,
-  onDecision,
-  onReset
-}: {
-  row: ModReviewRow;
-  onDecision: (decision: FinalModDecision) => void;
-  onReset: () => void;
-}) {
-  return (
-    <div className="ledger-row" role="row">
-      <span role="cell" title={row.file.fileName}>
-        <strong>{row.file.fileName}</strong>
-        {row.file.name && row.file.name !== row.file.fileName && <small>{row.file.name}</small>}
-      </span>
-      <span role="cell">{row.file.source}</span>
-      <span role="cell" className={`decision-cell ${row.automaticDecision}`}>
-        {decisionLabel(row.automaticDecision)}
-      </span>
-      <span role="cell" className={`review-cell ${row.userDecision ? "changed" : ""}`}>
-        <button
-          className={row.effectiveDecision === "include" ? "active include" : ""}
-          type="button"
-          title="保留到服务端包"
-          onClick={() => onDecision("include")}
-        >
-          <Check size={13} />
-          保留
-        </button>
-        <button
-          className={row.effectiveDecision === "exclude" ? "active exclude" : ""}
-          type="button"
-          title="从服务端包排除"
-          onClick={() => onDecision("exclude")}
-        >
-          <Ban size={13} />
-          排除
-        </button>
-        {row.userDecision && (
-          <button className="reset" type="button" title="恢复自动判断" onClick={onReset}>
-            <RotateCcw size={13} />
-          </button>
-        )}
-      </span>
-    </div>
-  );
-}
-
-function hasUserDecision(row: ModReviewRow): row is ModReviewRow & { userDecision: FinalModDecision } {
-  return row.userDecision !== undefined;
-}
-
-function toDecisionOverride(row: ModReviewRow & { userDecision: FinalModDecision }): ModDecisionOverride {
-  return {
-    fileName: row.file.fileName,
-    decision: row.userDecision,
-    reason: `用户复核：${decisionLabel(row.userDecision)}`,
-    ...(row.file.pathInPack === undefined ? {} : { pathInPack: row.file.pathInPack }),
-    source: row.file.source,
-    ...(row.file.projectId === undefined ? {} : { projectId: row.file.projectId }),
-    ...(row.file.fileId === undefined ? {} : { fileId: row.file.fileId }),
-    ...(row.file.versionId === undefined ? {} : { versionId: row.file.versionId })
-  };
-}
-
-function modFileKey(file: ModFileDescriptor, index: number): string {
-  return [
-    index,
-    file.source,
-    file.pathInPack ?? "",
-    file.projectId ?? "",
-    file.fileId ?? "",
-    file.versionId ?? "",
-    file.fileName
-  ].join("|");
-}
-
-function buildRuleIndex(overrides: ModDecisionOverride[]): Map<string, FinalModDecision> {
-  const index = new Map<string, FinalModDecision>();
-  for (const override of overrides) {
-    for (const key of modDecisionOverrideKeys(override)) {
-      index.set(key, override.decision);
-    }
-  }
-  return index;
-}
-
-function findRuleDecision(
-  file: ModFileDescriptor,
-  index: Map<string, FinalModDecision>
-): FinalModDecision | undefined {
-  for (const key of modDecisionFileKeys(file)) {
-    const decision = index.get(key);
-    if (decision) {
-      return decision;
-    }
-  }
-  return undefined;
-}
-
-function modDecisionFileKeys(file: ModFileDescriptor): string[] {
-  return [
-    ...(file.pathInPack ? [`path:${file.pathInPack}`] : []),
-    ...(file.projectId && file.fileId ? [`platform:${file.source}:${file.projectId}:${file.fileId}`] : []),
-    ...(file.projectId ? [`project:${file.source}:${file.projectId}`] : []),
-    ...(file.versionId ? [`version:${file.source}:${file.versionId}`] : []),
-    ...(file.slug ? [`slug:${file.source}:${normalizeRuleValue(file.slug)}`, `slug:${normalizeRuleValue(file.slug)}`] : []),
-    `file:${file.fileName}`
-  ];
-}
-
-function modDecisionOverrideKeys(override: ModDecisionOverride): string[] {
-  return [
-    ...(override.pathInPack ? [`path:${override.pathInPack}`] : []),
-    ...(override.source && override.projectId && override.fileId
-      ? [`platform:${override.source}:${override.projectId}:${override.fileId}`]
-      : []),
-    ...(override.source && override.projectId ? [`project:${override.source}:${override.projectId}`] : []),
-    ...(override.source && override.versionId ? [`version:${override.source}:${override.versionId}`] : []),
-    ...(override.modId ? [`modid:${normalizeRuleValue(override.modId)}`] : []),
-    ...(override.slug
-      ? [
-          ...(override.source ? [`slug:${override.source}:${normalizeRuleValue(override.slug)}`] : []),
-          `slug:${normalizeRuleValue(override.slug)}`
-        ]
-      : []),
-    ...(override.fileName ? [`file:${override.fileName}`] : [])
-  ];
-}
-
-function normalizeRuleValue(value: string): string {
-  return value.trim().toLowerCase();
-}
-
 function compactPath(value: string, maxLength: number): string {
   if (value.length <= maxLength) {
     return value;
@@ -1346,29 +962,6 @@ function compactPath(value: string, maxLength: number): string {
 function inferInputKind(filePath: string): InputSelection["kind"] {
   const lowerPath = filePath.toLowerCase();
   return lowerPath.endsWith(".mrpack") || lowerPath.endsWith(".zip") ? "file" : "directory";
-}
-
-function previewServerDecision(
-  file: ModFileDescriptor,
-  unknownPolicy: ConversionSettings["unknownPolicy"]
-): "include" | "exclude" | "manual-review" {
-  if (file.env?.server === "unsupported") {
-    return "exclude";
-  }
-  if (file.env?.server === "required" || file.env?.server === "optional") {
-    return "include";
-  }
-  return unknownPolicy;
-}
-
-function decisionLabel(decision: "include" | "exclude" | "manual-review"): string {
-  if (decision === "include") {
-    return "保留";
-  }
-  if (decision === "exclude") {
-    return "排除";
-  }
-  return "复核";
 }
 
 function phaseLabel(phase: ConversionPhase): string {

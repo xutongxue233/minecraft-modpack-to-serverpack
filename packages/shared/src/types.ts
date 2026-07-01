@@ -1,6 +1,6 @@
 export type PackType = "curseforge" | "modrinth" | "packwiz" | "instance";
 export type LoaderType = "forge" | "neoforge" | "fabric" | "quilt" | "vanilla";
-export type ModDecisionValue = "include" | "exclude" | "manual-review";
+export type ModDecisionValue = "include" | "exclude";
 export type RuleDecisionSource = "user-rule" | "remote-rule";
 
 export interface PackMetadata {
@@ -47,7 +47,7 @@ export interface ModDecision {
 
 export interface ModDecisionOverride {
   fileName?: string | undefined;
-  decision: Exclude<ModDecisionValue, "manual-review">;
+  decision: ModDecisionValue;
   reason?: string | undefined;
   pathInPack?: string | undefined;
   source?: ModFileDescriptor["source"] | undefined;
@@ -77,9 +77,9 @@ export interface ConversionRequestSettings {
   remoteRulesUrl?: string | undefined;
   remoteRulesCacheDir?: string | undefined;
   outputZip?: boolean | undefined;
+  generateOptimizedStartScript?: boolean | undefined;
   javaHome?: string | undefined;
   modRulesPath?: string | undefined;
-  modDecisions?: ModDecisionOverride[] | undefined;
 }
 
 export interface ConversionRequest {
@@ -137,7 +137,6 @@ export interface ConversionReport {
     failedDownloadFiles: number;
     includedFiles: number;
     excludedFiles: number;
-    manualReviewFiles: number;
   };
   serverpack: {
     core: {
@@ -187,7 +186,7 @@ export interface ConversionSettings {
   downloadRetry: number;
   maxExpandedSizeBytes: number;
   maxFileCount: number;
-  unknownPolicy: "manual-review" | "include" | "exclude";
+  unknownPolicy: "include" | "exclude";
   outputMode: "package-only" | "installable-server";
   downloadServerCore: boolean;
   testStartScript: boolean;
@@ -195,6 +194,7 @@ export interface ConversionSettings {
   remoteRulesEnabled: boolean;
   remoteRulesUrl: string;
   outputZip: boolean;
+  generateOptimizedStartScript: boolean;
   javaHome?: string;
   modRulesPath?: string;
   theme: "system" | "light" | "dark";

@@ -39,8 +39,24 @@ async function resolveStartupCommand(outputDir: string): Promise<{
   displayName: string;
 }> {
   if (process.platform === "win32") {
-    const powerShellScript = path.join(outputDir, "start.ps1");
+    // Prefer optimized scripts because users are expected to run them directly when generated.
+    const optimizedBatchScript = path.join(outputDir, "start-optimized.bat");
     const batchScript = path.join(outputDir, "start.bat");
+    const powerShellScript = path.join(outputDir, "start.ps1");
+    if (await pathExists(optimizedBatchScript)) {
+      return {
+        command: "cmd.exe",
+        args: ["/d", "/s", "/c", "call", optimizedBatchScript],
+        displayName: "start-optimized.bat"
+      };
+    }
+    if (await pathExists(batchScript)) {
+      return {
+        command: "cmd.exe",
+        args: ["/d", "/s", "/c", "call", batchScript],
+        displayName: "start.bat"
+      };
+    }
     if (await pathExists(powerShellScript)) {
       return {
         command: "powershell.exe",
@@ -48,13 +64,15 @@ async function resolveStartupCommand(outputDir: string): Promise<{
         displayName: "start.ps1"
       };
     }
-    if (await pathExists(batchScript)) {
-      return {
-        command: "cmd.exe",
-        args: ["/d", "/s", "/c", batchScript],
-        displayName: "start.bat"
-      };
-    }
+  }
+
+  const optimizedShellScript = path.join(outputDir, "start-optimized.sh");
+  if (await pathExists(optimizedShellScript)) {
+    return {
+      command: "bash",
+      args: [optimizedShellScript],
+      displayName: "start-optimized.sh"
+    };
   }
 
   const shellScript = path.join(outputDir, "start.sh");

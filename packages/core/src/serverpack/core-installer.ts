@@ -59,6 +59,7 @@ export async function prepareServerCore(options: PrepareServerCoreOptions): Prom
     assertInstallableCore(options.core);
     await fs.mkdir(options.outputDir, { recursive: true });
     options.onProgress?.({ current: 0, total: taskCountForCore(options.core.type), label: "准备服务端核心" });
+    await cleanServerCoreArtifacts(options.outputDir);
 
     switch (options.core.type) {
       case "vanilla":
@@ -78,10 +79,12 @@ export async function prepareServerCore(options: PrepareServerCoreOptions): Prom
         break;
     }
 
+    await assertInstalledCoreIsLaunchable(options.outputDir, options.core);
+    const installedFiles = await collectInstalledCoreFiles(options.outputDir);
     return {
       enabled: true,
       status: "installed",
-      files: await collectInstalledCoreFiles(options.outputDir),
+      files: installedFiles,
       warnings: []
     };
   } catch (error) {
@@ -443,6 +446,31 @@ function normalizeMinecraftPrefixedVersion(minecraftVersion: string, loaderVersi
   return loaderVersion.startsWith(`${minecraftVersion}-`) ? loaderVersion : `${minecraftVersion}-${loaderVersion}`;
 }
 
+async function cleanServerCoreArtifacts(outputDir: string): Promise<void> {
+  const artifacts = [
+    ".installer",
+    "libraries",
+    "server.jar",
+    "fabric-server-launch.jar",
+    "quilt-server-launch.jar",
+    "run.bat",
+    "run.sh"
+  ];
+
+  await Promise.all(
+    artifacts.map((artifact) =>
+      fs.rm(path.join(outputDir, artifact), { recursive: true, force: true }).catch(() => undefined)
+    )
+  );
+
+  const generatedLogs = await fs.readdir(outputDir).catch(() => []);
+  await Promise.all(
+    generatedLogs
+      .filter((fileName) => /^.+-installer\.jar\.log$/i.test(fileName))
+      .map((fileName) => fs.rm(path.join(outputDir, fileName), { force: true }).catch(() => undefined))
+  );
+}
+
 async function collectInstalledCoreFiles(outputDir: string): Promise<string[]> {
   const candidates = [
     "server.jar",
@@ -466,7 +494,95 @@ async function collectInstalledCoreFiles(outputDir: string): Promise<string[]> {
     }
   }
 
+  const forgeArgFiles = await collectForgeArgumentFiles(outputDir);
+  files.push(...forgeArgFiles);
   return files;
+}
+
+async function assertInstalledCoreIsLaunchable(outputDir: string, core: ServerCorePlan): Promise<void> {
+  switch (core.type) {
+    case "vanilla":
+      await requireFile(outputDir, "server.jar", "官方 server.jar 未生成。");
+      return;
+    case "fabric":
+      await requireFile(outputDir, "fabric-server-launch.jar", "Fabric 服务端启动器未生成。");
+      return;
+    case "quilt":
+      await requireFile(outputDir, "quilt-server-launch.jar", "Quilt 服务端启动器未生成。");
+      return;
+    case "forge":
+    case "neoforge": {
+      const forgeArgs = await collectForgeArgumentFiles(outputDir);
+      if (forgeArgs.length > 0) {
+        return;
+      }
+      throw appError(
+        "E_SERVER_CORE_INSTALL_FAILED",
+        `${core.type === "forge" ? "Forge" : "NeoForge"} 安装器执行结束，但没有生成可启动参数文件。`,
+        {
+          detail: {
+            expectedFiles: [
+              "libraries/net/minecraftforge/forge/*/win_args.txt",
+              "libraries/net/minecraftforge/forge/*/unix_args.txt",
+              "libraries/net/neoforged/forge/*/win_args.txt",
+              "libraries/net/neoforged/forge/*/unix_args.txt",
+              "libraries/net/neoforged/neoforge/*/win_args.txt",
+              "libraries/net/neoforged/neoforge/*/unix_args.txt"
+            ]
+          },
+          suggestion: "请删除当前输出目录后重新生成，并确认配置了兼容的 Java Home；也可以在输出目录手动运行 install-server.bat 查看安装器完整日志。"
+        }
+      );
+    }
+  }
+}
+
+async function requireFile(outputDir: string, relativePath: string, message: string): Promise<void> {
+  const absolutePath = path.join(outputDir, relativePath);
+  try {
+    const stat = await fs.stat(absolutePath);
+    if (stat.isFile()) {
+      return;
+    }
+  } catch {
+    // Handled below with a user-facing error.
+  }
+
+  throw appError("E_SERVER_CORE_INSTALL_FAILED", message, {
+    detail: { expectedFile: relativePath },
+    suggestion: "请删除当前输出目录后重新生成，并确认网络和 Java Home 配置可用。"
+  });
+}
+
+async function collectForgeArgumentFiles(outputDir: string): Promise<string[]> {
+  const roots = [
+    path.join(outputDir, "libraries", "net", "minecraftforge", "forge"),
+    path.join(outputDir, "libraries", "net", "neoforged", "forge"),
+    path.join(outputDir, "libraries", "net", "neoforged", "neoforge")
+  ];
+  const files: string[] = [];
+
+  for (const root of roots) {
+    const versions = await fs.readdir(root, { withFileTypes: true }).catch(() => []);
+    for (const version of versions) {
+      if (!version.isDirectory()) {
+        continue;
+      }
+      for (const fileName of ["win_args.txt", "unix_args.txt"]) {
+        const absolutePath = path.join(root, version.name, fileName);
+        try {
+          const stat = await fs.stat(absolutePath);
+          if (stat.isFile()) {
+            files.push(path.relative(outputDir, absolutePath).replaceAll("\\", "/"));
+          }
+        } catch {
+          // Missing platform-specific args files are handled by validation.
+        }
+      }
+    }
+  }
+
+  return files.sort();
 }
 
 function parseContentLength(value: string | null): number | undefined {

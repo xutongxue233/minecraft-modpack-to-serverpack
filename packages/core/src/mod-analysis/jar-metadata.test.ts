@@ -52,6 +52,36 @@ describe("scanJarMetadata", () => {
       source: "mods.toml"
     });
   });
+
+  it("maps Forge client-side runtime dependencies to server unsupported", async () => {
+    const jarPath = await createJar({
+      "META-INF/mods.toml": [
+        'modLoader = "javafml"',
+        'loaderVersion = "[47,)"',
+        "",
+        "[[mods]]",
+        'modId = "dynamic_fps"',
+        'displayName = "Dynamic FPS"',
+        "",
+        "[[dependencies.dynamic_fps]]",
+        'modId = "minecraft"',
+        'mandatory = true',
+        'versionRange = "[1.20.1,)"',
+        'side = "CLIENT"'
+      ].join("\n")
+    });
+
+    await expect(scanJarMetadata(jarPath)).resolves.toMatchObject({
+      modId: "dynamic_fps",
+      name: "Dynamic FPS",
+      loader: "forge",
+      env: {
+        client: "required",
+        server: "unsupported"
+      },
+      source: "mods.toml"
+    });
+  });
 });
 
 async function createJar(entries: Record<string, string>): Promise<string> {

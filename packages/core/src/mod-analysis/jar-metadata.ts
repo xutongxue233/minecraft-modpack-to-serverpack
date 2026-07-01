@@ -105,12 +105,14 @@ function parseForgeLikeModsToml(text: string, loader: "forge" | "neoforge"): Jar
   const toml = parseToml(text) as UnknownRecord;
   const mods = asArray(toml.mods).map(asRecord);
   const primaryMod = mods[0] ?? {};
+  const modId = asString(primaryMod.modId);
 
   return pruneMetadata({
-    modId: asString(primaryMod.modId),
-    name: asString(primaryMod.displayName) ?? asString(primaryMod.modId),
+    modId,
+    name: asString(primaryMod.displayName) ?? modId,
     version: asString(primaryMod.version),
     loader,
+    env: inferForgeEnvFromDependencies(toml, modId, loader),
     source: loader === "neoforge" ? "neoforge.mods.toml" : "mods.toml"
   });
 }
@@ -140,6 +142,33 @@ function environmentToEnv(environment: string | undefined): ModFileDescriptor["e
 
   if (environment === "*" || environment === undefined) {
     return { client: "required", server: "required" };
+  }
+
+  return undefined;
+}
+
+function inferForgeEnvFromDependencies(
+  toml: UnknownRecord,
+  modId: string | undefined,
+  loader: "forge" | "neoforge"
+): ModFileDescriptor["env"] | undefined {
+  if (!modId) {
+    return undefined;
+  }
+
+  const dependencies = asRecord(toml.dependencies);
+  const modDependencies = asArray(dependencies[modId]).map(asRecord);
+  const runtimeDependencyIds = new Set(["minecraft", loader]);
+  const runtimeSides = modDependencies
+    .filter((dependency) => runtimeDependencyIds.has(asString(dependency.modId)?.toLowerCase() ?? ""))
+    .map((dependency) => asString(dependency.side)?.toUpperCase());
+
+  if (runtimeSides.includes("CLIENT")) {
+    return { client: "required", server: "unsupported" };
+  }
+
+  if (runtimeSides.includes("SERVER")) {
+    return { client: "unsupported", server: "required" };
   }
 
   return undefined;

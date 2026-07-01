@@ -8,7 +8,7 @@ export interface DecideModsOptions {
 }
 
 export function decideMods(files: ModFileDescriptor[], options: DecideModsOptions = {}): ModDecision[] {
-  const unknownPolicy = options.unknownPolicy ?? "manual-review";
+  const unknownPolicy = options.unknownPolicy ?? "include";
   const overrideIndex = buildOverrideIndex(options.overrides ?? []);
   return files.map((file) => {
     const jarMetadata = options.metadataByFile?.get(file);
@@ -17,7 +17,7 @@ export function decideMods(files: ModFileDescriptor[], options: DecideModsOption
       return {
         fileName: file.fileName,
         decision: override.decision,
-        reason: override.reason?.trim() || `用户复核：${override.decision === "include" ? "保留" : "排除"}`,
+        reason: override.reason?.trim() || `规则：${override.decision === "include" ? "保留" : "排除"}`,
         source: override.decisionSource ?? "user-rule"
       };
     }
@@ -27,7 +27,7 @@ export function decideMods(files: ModFileDescriptor[], options: DecideModsOption
 
 export function decideMod(
   file: ModFileDescriptor,
-  unknownPolicy: ModDecisionValue = "manual-review",
+  unknownPolicy: ModDecisionValue = "include",
   jarMetadata?: JarModMetadata
 ): ModDecision {
   if (file.env?.server === "unsupported") {

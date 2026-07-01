@@ -7,7 +7,7 @@
 
 ## 1. 架构目标
 
-本工具 MVP 采用 Electron 开发 Windows 桌面程序，目标是在不打开终端的情况下完成整合包导入、解析、Mod 复核、转换、打包和报告查看。
+本工具 MVP 采用 Electron 开发 Windows 桌面程序，目标是在不打开终端的情况下完成整合包导入、解析、规则化 Mod 筛选、转换、打包和报告查看。
 
 架构设计目标：
 
@@ -28,7 +28,7 @@
 | 后台任务 | Node.js Worker Threads | 下载、解压、哈希、JAR 扫描和打包放入 Worker。 |
 | 打包工具 | electron-builder | 输出 Windows NSIS 安装包和 portable 免安装包。 |
 | 日志 | electron-log 或 pino | 主进程和 Worker 写诊断日志，UI 展示摘要。 |
-| 数据校验 | zod | 校验 IPC 参数、配置文件、规则文件、报告结构。 |
+| 数据校验 | zod | 校验 IPC 参数、配置文件、规则库文件、报告结构。 |
 | JSON | 原生 JSON / zod schema | 解析 Modrinth、报告、配置。 |
 | TOML | smol-toml 或 @iarna/toml | 解析 packwiz、Forge/NeoForge 元数据。 |
 | 压缩包 | yauzl + yazl 或 adm-zip | 安全读取 zip/mrpack，输出服务端 zip。 |
@@ -68,7 +68,7 @@ flowchart TD
 - 首页/任务创建。
 - 转换配置表单。
 - 解析结果展示。
-- Mod 人工复核表格。
+- 规则配置、转换进度、日志摘要、错误提示。
 - 转换进度、日志摘要、错误提示。
 - 结果页和设置页。
 
@@ -197,7 +197,7 @@ Worker 必须支持：
 | `packages/core/download` | 下载、重试、限速、缓存、哈希校验。 |
 | `packages/core/archive` | 安全解压、zip 输出、路径穿越防护。 |
 | `packages/core/mod-analysis` | JAR 元数据读取、client-only 判断。 |
-| `packages/core/rules` | 内置规则和用户规则合并。 |
+| `packages/core/rules` | 内置规则和远程规则库合并。 |
 | `packages/core/serverpack` | 服务端目录生成、启动脚本、README。 |
 | `packages/core/report` | JSON/Markdown 报告生成。 |
 | `packages/shared` | 类型、错误码、IPC schema、通用工具。 |
@@ -236,7 +236,7 @@ sequenceDiagram
 5. 下载与缓存：并发下载，流式写入临时文件。
 6. 哈希校验：sha1/sha512 等。
 7. JAR 扫描：读取 `fabric.mod.json`、`quilt.mod.json`、`mods.toml`、`neoforge.mods.toml`、`mcmod.info`。
-8. Mod 决策：内置规则、平台 env、用户规则、manual-review 合并。
+8. Mod 决策：远程规则库、平台 env 和 JAR 元数据合并。
 9. overrides 合并：处理 `overrides/`、`server-overrides/`，排除客户端文件。
 10. 服务端包生成：输出 `mods/`、`config/`、启动脚本、README。
 11. 报告生成：输出 `conversion-report.json` 和可选 Markdown。
@@ -267,7 +267,6 @@ type JobEvent =
   | { type: "phase"; jobId: string; phase: ConversionPhase; message: string }
   | { type: "progress"; jobId: string; current: number; total: number; bytesPerSecond?: number }
   | { type: "log"; jobId: string; level: "debug" | "info" | "warn" | "error"; message: string }
-  | { type: "manualReviewRequired"; jobId: string; mods: ModDecision[] }
   | { type: "completed"; jobId: string; outputDir: string; zipPath?: string; reportPath: string }
   | { type: "failed"; jobId: string; error: AppError; reportPath?: string }
   | { type: "cancelled"; jobId: string };
@@ -280,7 +279,7 @@ type JobEvent =
 ```ts
 type PackType = "curseforge" | "modrinth" | "packwiz" | "instance";
 type LoaderType = "forge" | "neoforge" | "fabric" | "quilt" | "vanilla";
-type ModDecisionValue = "include" | "exclude" | "manual-review";
+type ModDecisionValue = "include" | "exclude";
 
 interface PackMetadata {
   type: PackType;
@@ -321,8 +320,7 @@ interface ModDecision {
 | --- | --- |
 | `TaskCreatePage` | 拖拽/选择输入、选择输出目录。 |
 | `AnalyzePage` | 展示解析结果和缺失元数据补全表单。 |
-| `ConfigPage` | 输出模式、zip、内存、未知 Mod 策略、API key、缓存目录。 |
-| `ReviewPage` | unknown/manual-review Mod 表格，支持搜索、筛选、批量决策。 |
+| `ConfigPage` | 输出模式、zip、优化启动脚本、Java Home、API key、缓存目录。 |
 | `ProgressPage` | 阶段进度、下载速度、日志摘要、取消任务。 |
 | `ResultPage` | 输出路径、报告、README、失败建议。 |
 | `SettingsPage` | 默认配置、安全限制、日志级别、缓存清理。 |
@@ -331,7 +329,7 @@ interface ModDecision {
 
 - 简单 MVP 可使用 Zustand。
 - 表单使用 React Hook Form + zod resolver。
-- 表格使用 TanStack Table，适合 Mod 复核筛选和批量选择。
+- 对列表型设置保留可扩展组件边界，但 MVP 不提供只读 Mod 预览或人工决策表格。
 
 ## 10. 本地存储
 
@@ -408,7 +406,7 @@ serverpack/
 生成策略：
 
 - `mods/` 只放 `include` 的 Mod。
-- `manual-review` 未处理时禁止生成最终包。
+- 未知 Mod 默认保留，避免静默删除服务端依赖；已知客户端 Mod 由规则排除。
 - `overrides/` 先合并，`server-overrides/` 后合并。
 - 默认排除客户端专用文件。
 - `eula.txt` 不自动设置为 `eula=true`。
@@ -440,7 +438,6 @@ interface AppError {
 | `E_CURSEFORGE_API_KEY_REQUIRED` | CurseForge 下载需要 API key。 |
 | `E_DOWNLOAD_FAILED` | 下载失败。 |
 | `E_DOWNLOAD_HASH_MISMATCH` | 哈希校验失败。 |
-| `E_MOD_REVIEW_REQUIRED` | 存在必须人工复核的 Mod。 |
 | `E_LOADER_UNSUPPORTED` | 加载器或版本暂不支持。 |
 | `E_OUTPUT_WRITE_FAILED` | 输出目录写入失败。 |
 | `E_JOB_CANCELLED` | 任务被用户取消。 |
@@ -527,7 +524,7 @@ artifactName: "${productName}-${version}-${arch}.${ext}"
 - 拖拽导入。
 - 选择输出目录。
 - 展示解析结果。
-- manual-review 表格搜索、筛选、批量决策。
+- 远程规则库命中和优先级。
 - 转换中取消任务。
 - 成功后打开输出目录和报告。
 - 失败后展示错误码和建议。
@@ -565,7 +562,7 @@ pnpm dist:win
 
 - 实现下载、缓存、哈希。
 - 实现 JAR 元数据扫描。
-- 实现 Mod 决策和规则文件。
+- 实现 Mod 决策和远程规则库。
 - 实现 overrides 合并。
 
 ### A4：服务端包输出
@@ -590,7 +587,7 @@ pnpm dist:win
 | 大文件操作卡 UI | 所有重型任务进入 Worker Threads。 |
 | Node zip 库路径安全差异 | 自建统一安全路径校验，不依赖库默认行为。 |
 | CurseForge 下载限制 | 明确 API key 配置和可诊断失败。 |
-| Mod 侧别判断不准 | manual-review 界面和规则文件兜底。 |
+| Mod 侧别判断不准 | 远程规则库和报告提示兜底。 |
 | Windows 杀毒或 SmartScreen 提示 | P1 引入代码签名；MVP 文档中说明。 |
 
 ## 21. 参考资料

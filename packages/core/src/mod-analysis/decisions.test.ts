@@ -32,11 +32,11 @@ describe("decideMods", () => {
     ]);
   });
 
-  it("sends unknown mods to manual review by default", () => {
+  it("includes unknown mods by default", () => {
     expect(decideMods([modFile("unknown.jar")])).toEqual([
       {
         fileName: "unknown.jar",
-        decision: "manual-review",
+        decision: "include",
         reason: "缺少明确服务端环境声明",
         source: "unknown"
       }
@@ -73,7 +73,7 @@ describe("decideMods", () => {
     ]);
   });
 
-  it("applies user review decisions before automatic rules", () => {
+  it("applies user rules before automatic rules", () => {
     const file = modFile("client-only.jar", { server: "unsupported" });
 
     expect(

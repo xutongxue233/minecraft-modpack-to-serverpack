@@ -113,18 +113,18 @@ Minecraft Java 版整合包通常面向客户端分发，常见格式包括 Curs
 
 ### FR-004 服务端 Mod 筛选
 
-- 工具必须给每个 Mod 生成服务端安装决策：`include`、`exclude`、`manual-review`。
+- 工具必须给每个 Mod 生成服务端安装决策：`include` 或 `exclude`。
 - Modrinth 文件存在 `env.server = unsupported` 时必须默认排除。
 - 存在 `env.server = required` 或 `optional` 时必须默认保留，并在报告中标注依据。
 - 对 Fabric/Quilt Mod，工具应解析 JAR 内 `fabric.mod.json`、`quilt.mod.json` 中的环境字段。
 - 对 Forge/NeoForge Mod，工具应解析 `mods.toml`、`neoforge.mods.toml`、旧版 `mcmod.info`，并结合规则库判断。
-- 对无法明确判断的 Mod，默认进入 `manual-review`；桌面程序必须提供人工复核界面，允许用户批量包含或排除未知 Mod。
-- 用户必须能通过规则文件强制包含或排除指定 Mod。
+- 对无法明确判断的 Mod，默认保留，避免静默删除服务端依赖。
+- 用户必须能通过远程规则库强制包含或排除指定 Mod。
 
 验收标准：
 
 - 明确 client-only 的 Mod 不进入最终 `mods/`。
-- 不确定项不会被无提示地删除。
+- 不确定项不会被无提示地删除，默认保留并在报告中标注依据不足。
 - 转换报告列出每个 Mod 的最终决策和判断依据。
 
 ### FR-005 overrides 合并
@@ -132,7 +132,7 @@ Minecraft Java 版整合包通常面向客户端分发，常见格式包括 Curs
 - CurseForge 包必须把 `overrides/` 合并到服务端根目录，但要按服务端规则排除明显客户端文件。
 - Modrinth 包必须先合并 `overrides/`，再合并 `server-overrides/`，后者覆盖前者。
 - Modrinth 包默认忽略 `client-overrides/`。
-- 默认排除客户端特有文件或目录：`options.txt`、`servers.dat`、`screenshots/`、`shaderpacks/`、`resourcepacks/`、`config/iris*` 等；用户可通过规则文件覆盖。
+- 默认排除客户端特有文件或目录：`options.txt`、`servers.dat`、`screenshots/`、`shaderpacks/`、`resourcepacks/`、`config/iris*` 等；规则修正通过远程规则库维护。
 - 必须保留服务端常用目录：`config/`、`defaultconfigs/`、`kubejs/`、`scripts/`、`serverconfig/`、`world/datapacks/` 等。
 
 验收标准：
@@ -200,9 +200,8 @@ MVP 必须提供桌面程序作为主要入口。
 核心界面：
 
 - 首页/任务创建：选择或拖拽输入包，选择输出目录，显示识别出的包类型。
-- 转换配置：设置输出模式、是否生成 zip、内存参数、未知 Mod 处理策略、CurseForge API key、缓存目录。
+- 转换配置：设置输出模式、是否生成 zip、是否生成优化启动脚本、CurseForge API key、Java Home 和缓存目录。
 - 解析结果：展示整合包名称、版本、Minecraft 版本、加载器类型、加载器版本、Mod 数量和 overrides 文件数量。
-- Mod 复核：展示每个 Mod 的名称、文件名、来源、判断结果、判断依据，允许搜索、筛选、批量包含、批量排除。
 - 转换进度：展示当前阶段、下载进度、速度、失败重试、日志摘要和可取消按钮。
 - 转换结果：展示成功/失败状态、服务端包路径、zip 路径、报告入口、README 入口和错误建议。
 - 设置页：管理默认输出目录、下载并发数、缓存目录、API key、安全限制和日志级别。
@@ -212,7 +211,6 @@ MVP 必须提供桌面程序作为主要入口。
 - 必须支持点击选择文件/目录。
 - 必须支持拖拽 `.zip`、`.mrpack` 或 packwiz 目录到窗口。
 - 必须在转换开始前展示关键配置确认。
-- 必须在遇到 `manual-review` Mod 时阻止直接完成转换，除非用户选择统一策略。
 - 必须支持取消任务；取消后不能留下半成品输出包。
 - 必须支持打开输出目录、打开报告文件、复制错误信息。
 - 必须对 API key 做遮蔽显示，并提供清除按钮。
@@ -221,7 +219,7 @@ MVP 必须提供桌面程序作为主要入口。
 验收标准：
 
 - 用户不打开终端即可完成一次 `.mrpack` 到服务端 zip 的转换。
-- 用户能在界面中处理未知 Mod，并在报告中看到自己的决策。
+- 用户能通过远程规则库控制客户端 Mod 排除，并在报告中看到规则依据。
 - 转换失败时，界面能打开失败报告并展示失败阶段。
 - API key 不会以明文出现在界面日志、报告或输出包中。
 
@@ -233,7 +231,7 @@ MVP 必须提供桌面程序作为主要入口。
 
 ```bash
 mc-serverpack convert ./modpack.mrpack --out ./dist --zip
-mc-serverpack convert ./curseforge-pack.zip --cf-api-key env:CF_API_KEY --unknown manual-review
+mc-serverpack convert ./curseforge-pack.zip --cf-api-key env:CF_API_KEY --unknown include
 mc-serverpack convert ./packwiz-pack --mode installable-server --memory 6G
 ```
 
@@ -247,15 +245,14 @@ mc-serverpack convert ./packwiz-pack --mode installable-server --memory 6G
 - `--zip`：同时生成 zip。
 - `--mode package-only|installable-server`：输出模式。
 - `--cf-api-key`：CurseForge API key 来源。
-- `--unknown manual-review|include|exclude`：未知 Mod 处理策略。
-- `--rules rules.yml`：用户侧筛选/覆盖规则。
+- `--unknown include|exclude`：未知 Mod 处理策略，默认 include。
 - `--cache-dir`：下载缓存目录。
 - `--clean`：转换前清理输出目录。
 - `--dry-run`：只解析和生成报告，不下载或写服务端包。
 
-### FR-010 规则文件
+### FR-010 远程规则库
 
-工具必须支持 YAML 或 JSON 规则文件，用于人工修正判断：
+工具必须支持 YAML 或 JSON 规则库格式，用于修正自动判断。桌面端固定拉取远程规则库，不暴露本地规则文件选择入口：
 
 ```yaml
 mods:
@@ -275,7 +272,7 @@ overrides:
 
 验收标准：
 
-- 规则文件优先级高于内置规则。
+- 远程规则库优先级高于内置规则。
 - 规则命中情况写入报告。
 
 ### FR-011 日志与错误处理
@@ -332,7 +329,7 @@ flowchart TD
   E --> F["下载/读取 Mod 文件"]
   F --> G["哈希校验"]
   G --> H["判断服务端兼容性"]
-  H --> I["人工复核未知 Mod"]
+  H --> I["应用远程规则库"]
   I --> J["合并 overrides"]
   J --> K["生成加载器运行文件与启动脚本"]
   K --> L["生成报告和 README"]
@@ -346,13 +343,13 @@ MVP 必须完成：
 - 桌面程序。
 - 文件/目录选择与拖拽导入。
 - 可视化转换配置、进度、日志和结果页。
-- Mod 人工复核界面。
+- 远程规则库。
 - 设置页，支持 API key、缓存目录、下载并发数、默认输出目录。
 - 支持 CurseForge `.zip`、Modrinth `.mrpack`、packwiz 目录。
 - 支持 Forge、NeoForge、Fabric、Quilt 的元数据识别。
 - 下载与哈希校验。
 - 基础 client-only 筛选规则。
-- 用户规则文件。
+- 远程规则库维护格式。
 - 输出目录和 zip。
 - `README.md`、`conversion-report.json`。
 - 路径安全、API key 脱敏、失败报告。
@@ -390,7 +387,7 @@ MVP 可以暂缓：
 - 文件选择导入。
 - 拖拽导入。
 - 配置项保存与读取。
-- manual-review 列表筛选、搜索、批量决策。
+- 远程规则库命中和优先级。
 - 任务进度展示和取消。
 - 转换成功后打开输出目录和报告。
 - 转换失败后展示错误码和诊断建议。
@@ -417,7 +414,7 @@ MVP 可以暂缓：
 | `download.retry` | `3` | 下载失败重试次数。 |
 | `security.maxExpandedSize` | `4GB` | 解压后最大总大小。 |
 | `security.maxFileCount` | `20000` | 最大文件数量。 |
-| `mod.unknownPolicy` | `manual-review` | 未知 Mod 处理策略。 |
+| `mod.unknownPolicy` | `include` | 未知 Mod 处理策略。 |
 | `output.mode` | `package-only` | 默认不预装加载器。 |
 | `output.zip` | `false` | 默认只输出目录。 |
 | `ui.defaultOutputDir` | 用户文档目录 | 桌面端默认输出目录。 |
@@ -445,7 +442,7 @@ MVP 可以暂缓：
       "id": "mod-id",
       "fileName": "mod.jar",
       "source": "modrinth|curseforge|direct|local",
-      "decision": "include|exclude|manual-review",
+      "decision": "include|exclude",
       "reason": "env.server=unsupported",
       "hash": {
         "sha1": "..."
@@ -477,8 +474,8 @@ MVP 可以暂缓：
 
 - 完成内置规则库。
 - 完成 JAR 元数据扫描。
-- 完成用户规则文件。
-- 完成桌面端 manual-review 复核界面和报告记录。
+- 完成远程规则库维护格式。
+- 完成远程规则和报告决策记录。
 
 ### M4：加载器服务端生成
 
@@ -497,7 +494,7 @@ MVP 可以暂缓：
 
 ## 16. 主要风险
 
-- Mod 侧别信息不完整：很多 Mod 不声明是否支持服务端，需要规则库和人工复核兜底。
+- Mod 侧别信息不完整：很多 Mod 不声明是否支持服务端，需要远程规则库和报告提示兜底。
 - CurseForge 下载限制：需要 API key，部分文件可能无直接下载地址。
 - 加载器版本差异：Forge/NeoForge 不同 Minecraft 版本的服务端启动方式存在差异。
 - 桌面端打包差异：Windows、macOS、Linux 的文件权限、杀毒误报、路径编码和证书签名要求不同。

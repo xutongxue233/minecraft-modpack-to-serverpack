@@ -1,6 +1,6 @@
 {
   "name": "@mcsp/desktop",
-  "version": "0.1.0",
+  "version": "0.1.0-alpha.3",
   "private": true,
   "description": "Electron desktop application for converting Minecraft modpacks into server packs.",
   "author": "Minecraft Serverpack Tool Contributors",

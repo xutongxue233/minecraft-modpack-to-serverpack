@@ -13,22 +13,22 @@
 - 通过 CurseForge API 把 `projectID/fileID` 数字条目补全为真实 Mod 名称、文件名和下载地址。
 - 通过 Modrinth SHA-1 version lookup 和项目元数据补全文件信息。
 - 从 JAR 中读取 `fabric.mod.json`、`quilt.mod.json`、`META-INF/mods.toml`、`META-INF/neoforge.mods.toml`、`mcmod.info`。
-- 桌面端提供 Mod 复核清单，支持搜索、按决策筛选、批量保留、批量排除和行级重置。
-- 支持 GitHub 远程项目级客户端 Mod 规则库和 JSON/YAML 用户规则文件，按 CurseForge projectID、Modrinth projectID、modId、slug 等稳定标识固定包含/排除规则。
-- 生成转换报告，包含文件决策、下载状态、哈希、警告和人工复核项。
+- 使用远程项目级规则库和平台/JAR 元数据自动判断客户端 Mod。
+- 支持 GitHub 远程项目级客户端 Mod 规则库，按 CurseForge projectID、Modrinth projectID、modId、slug 等稳定标识固定包含/排除规则。
+- 生成转换报告，包含文件决策、规则来源、下载状态、哈希和警告。
 - 单个 Mod 下载失败时仍会生成初版报告，并把对应文件标记为 `failed`。
-- Mod 清单预览支持滚动展示完整列表，并完整显示 JAR 文件名和版本。
 - 生成服务端包目录，包含筛选后的 `mods/`、服务端安全 overrides、`server-core.json`、EULA 占位文件、JVM 参数、安装脚本和启动脚本。
 - 可选在输出目录同级生成便于分发的服务端包 `.zip`。
 - 根据整合包元数据选择 Vanilla、Fabric、Quilt、Forge 或 NeoForge 服务端核心，并给出 Java 版本建议。
 - 可选直接下载/安装服务端核心，接受 EULA 后即可在 Windows 运行 `start.bat`，在 Linux/macOS 运行 `start.sh`。
+- 可选生成 `start-optimized.bat` 和 `start-optimized.sh`，内联优化 JVM 参数，不额外生成参数 txt 文件。
 - 直接下载核心后可运行启动脚本测试，日志会显示在桌面端任务日志中；测试只验证到 EULA 检查，不会自动接受 EULA。
 - 支持在桌面端配置 Java Home；生成的服务端脚本会先读取 `java-home.txt`，再回退到 `JAVA_HOME` 和系统 `java`。
 - 下载阶段按 Mod 下载和核心下载分组显示进度；Mod 下载展示已完成数量、百分比和当前文件，核心下载展示字节进度。
 
 ## 当前状态
 
-项目处于 MVP 早期阶段。当前已经覆盖输入解析、平台元数据补全、下载校验、服务端 Mod 筛选、远程项目级规则库、人工复核、用户规则文件、初版服务端目录生成、可选服务端核心直接安装、可选 zip 输出、报告生成和桌面工作流。packwiz 远程 metafile 和发布自动化会继续完善。
+项目处于 MVP 早期阶段。当前已经覆盖输入解析、平台元数据补全、下载校验、服务端 Mod 自动筛选、远程项目级规则库、初版服务端目录生成、可选服务端核心直接安装、可选优化启动脚本、可选 zip 输出、报告生成和桌面工作流。packwiz 远程 metafile 和发布自动化会继续完善。
 
 ## 支持格式
 
@@ -42,7 +42,7 @@
 
 很多 Minecraft 整合包默认面向客户端发布。服务端包通常需要额外处理：
 
-- 移除或复核纯客户端 Mod；
+- 按规则移除纯客户端 Mod；
 - 保留服务端 Mod 和双端 Mod；
 - 合并服务端安全的 overrides；
 - 保留哈希和来源信息，方便审计；
@@ -89,11 +89,15 @@ pnpm dist:win
 
 构建产物位于 `apps/desktop/release/`。该目录不会提交到 Git，二进制文件应通过 GitHub Releases 发布，而不是直接提交到源码仓库。
 
-## Mod 规则文件
+## API Key 安全
 
-桌面端默认启用 GitHub 远程项目级规则库，规则库文件位于 `rules/client-mod-rules.json`，发布后会通过 GitHub raw URL 拉取并缓存到本机。远程规则维护的是项目级稳定标识，不维护每个版本的 `fileID` 或 hash。
+桌面端不会内置发布用 CurseForge API Key。用户在界面中保存的 Key 会通过 Electron `safeStorage` 使用系统安全存储加密后写入本机配置；旧版明文配置会在启动时迁移为密文，无法加密时会移除明文 Key。打包产物启用 ASAR、压缩和 JS minify，但这不能作为客户端内置密钥的安全边界。
 
-桌面端也可以选择 `.json`、`.yaml` 或 `.yml` 用户规则文件。优先级为：远程规则 < 用户规则文件 < 本次界面人工复核。
+## Mod 规则库
+
+桌面端固定启用 GitHub 远程项目级规则库，规则库文件位于 `rules/client-mod-rules.json`，发布后会通过 GitHub raw URL 拉取并缓存到本机。远程规则维护的是项目级稳定标识，不维护每个版本的 `fileID` 或 hash。
+
+桌面端不再暴露本地规则文件选择入口。规则修正应提交到远程规则库，命中后优先于平台/JAR 元数据自动判断。
 
 ```json
 {

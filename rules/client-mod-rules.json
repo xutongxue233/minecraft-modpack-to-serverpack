@@ -58,6 +58,357 @@
         "slugs": ["just-enough-characters", "jecharacters"]
       },
       "loaders": ["forge", "neoforge", "fabric", "quilt"]
+    },
+    {
+      "id": "sound-physics-remastered",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "客户端声音物理增强 Mod，服务端加载可能引用 client-only 类。",
+      "match": {
+        "modIds": ["sound_physics_remastered"],
+        "slugs": ["sound-physics-remastered"]
+      }
+    },
+    {
+      "id": "dynamic-fps",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "客户端帧率/后台资源优化 Mod，不应进入服务端。",
+      "match": {
+        "modIds": ["dynamic_fps"],
+        "slugs": ["dynamic-fps"]
+      }
+    },
+    {
+      "id": "presence-footsteps",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "客户端脚步声音效 Mod，不应进入服务端。",
+      "match": {
+        "modIds": ["presencefootsteps"],
+        "slugs": ["presence-footsteps"]
+      }
+    },
+    {
+      "id": "shoulder-surfing-reloaded",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "客户端第三人称视角 Mod，不应进入服务端。",
+      "match": {
+        "modIds": ["shouldersurfing"],
+        "slugs": ["shoulder-surfing-reloaded"]
+      }
+    },
+    {
+      "id": "controlling",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "客户端按键绑定界面 Mod，不应进入服务端。",
+      "match": {
+        "modIds": ["controlling"],
+        "slugs": ["controlling"]
+      }
+    },
+    {
+      "id": "configured",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "客户端配置界面 Mod，不应进入服务端。",
+      "match": {
+        "modIds": ["configured"],
+        "slugs": ["configured"]
+      }
+    },
+    {
+      "id": "searchables",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "客户端搜索框增强库，不应进入服务端。",
+      "match": {
+        "modIds": ["searchables"],
+        "slugs": ["searchables"]
+      }
+    },
+    {
+      "id": "fancymenu",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "客户端菜单定制 Mod，不应进入服务端。",
+      "match": {
+        "modIds": ["fancymenu"],
+        "slugs": ["fancymenu", "fancy-menu"]
+      }
+    },
+    {
+      "id": "drippy-loading-screen",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "客户端加载界面定制 Mod，不应进入服务端。",
+      "match": {
+        "modIds": ["drippyloadingscreen"],
+        "slugs": ["drippy-loading-screen"]
+      }
+    },
+    {
+      "id": "melody",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "FancyMenu 客户端音频库，不应进入服务端。",
+      "match": {
+        "modIds": ["melody"],
+        "slugs": ["melody"]
+      }
+    },
+    {
+      "id": "embeddium",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "Forge 客户端渲染优化 Mod，不应进入服务端。",
+      "match": {
+        "modIds": ["embeddium", "rubidium"],
+        "slugs": ["embeddium", "rubidium"]
+      },
+      "loaders": ["forge", "neoforge"]
+    },
+    {
+      "id": "sodium-dynamic-lights",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "客户端动态光源 Mod，不应进入服务端。",
+      "match": {
+        "modIds": ["sodiumdynamiclights"],
+        "slugs": ["sodium-dynamic-lights"]
+      }
+    },
+    {
+      "id": "mouse-tweaks",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "客户端鼠标操作增强 Mod，不应进入服务端。",
+      "match": {
+        "modIds": ["mousetweaks"],
+        "slugs": ["mouse-tweaks"]
+      }
+    },
+    {
+      "id": "xaeros-minimap",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "客户端小地图 Mod，不应进入服务端。",
+      "match": {
+        "modIds": ["xaerominimap"],
+        "slugs": ["xaeros-minimap"]
+      }
+    },
+    {
+      "id": "xaeros-world-map",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "客户端世界地图 Mod，不应进入服务端。",
+      "match": {
+        "modIds": ["xaeroworldmap"],
+        "slugs": ["xaeros-world-map"]
+      }
+    },
+    {
+      "id": "whats-that-slot",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "客户端物品栏槽位提示 Mod，不应进入服务端。",
+      "match": {
+        "modIds": ["whats_that_slot"],
+        "slugs": ["whats-that-slot"]
+      }
+    },
+    {
+      "id": "tfc-vessel-tooltip",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "客户端 tooltip 辅助 Mod，不应进入服务端。",
+      "match": {
+        "modIds": ["tfcvesseltooltip"],
+        "slugs": ["tfc-vessel-tooltip"]
+      }
+    },
+    {
+      "id": "language-reload",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "客户端语言重载 Mod，不应进入服务端。",
+      "match": {
+        "modIds": ["languagereload"],
+        "slugs": ["language-reload"]
+      }
+    },
+    {
+      "id": "season-hud",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "客户端季节 HUD Mod，不应进入服务端。",
+      "match": {
+        "modIds": ["seasonhud"],
+        "slugs": ["seasonhud", "season-hud"]
+      }
+    },
+    {
+      "id": "just-enough-items",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "客户端配方查看 Mod，不应进入服务端。",
+      "match": {
+        "modIds": ["jei"],
+        "slugs": ["jei", "just-enough-items"]
+      }
+    },
+    {
+      "id": "jei-multiblocks",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "JEI 客户端扩展，不应进入服务端。",
+      "match": {
+        "modIds": ["jeimultiblocks"],
+        "slugs": ["just-enough-immersive-multiblocks"]
+      }
+    },
+    {
+      "id": "jade",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "客户端方块/实体信息 HUD Mod，服务端包不需要携带。",
+      "match": {
+        "modIds": ["jade"],
+        "slugs": ["jade"]
+      }
+    },
+    {
+      "id": "not-enough-recipe-book",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "客户端配方书优化 Mod，不应进入服务端。",
+      "match": {
+        "modIds": ["nerb"],
+        "slugs": ["not-enough-recipe-book"]
+      }
+    },
+    {
+      "id": "entity-culling",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "客户端实体渲染剔除优化 Mod，不应进入服务端。",
+      "match": {
+        "modIds": ["entityculling"],
+        "slugs": ["entityculling", "entity-culling"]
+      }
+    },
+    {
+      "id": "skin-layers-3d",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "客户端皮肤渲染 Mod，不应进入服务端。",
+      "match": {
+        "modIds": ["skinlayers3d"],
+        "slugs": ["skin-layers-3d"]
+      }
+    },
+    {
+      "id": "toast-control",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "客户端通知界面控制 Mod，不应进入服务端。",
+      "match": {
+        "modIds": ["toastcontrol"],
+        "slugs": ["toast-control"]
+      }
+    },
+    {
+      "id": "forge-config-screens",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "客户端配置界面库，不应进入服务端。",
+      "match": {
+        "modIds": ["forgeconfigscreens"],
+        "slugs": ["forge-config-screens"]
+      }
+    },
+    {
+      "id": "better-advancements",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "客户端进度界面增强 Mod，不应进入服务端。",
+      "match": {
+        "modIds": ["betteradvancements"],
+        "slugs": ["better-advancements"]
+      }
+    },
+    {
+      "id": "create-ponder",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "客户端 Ponder 展示 Mod，不应进入服务端。",
+      "match": {
+        "modIds": ["createponder"],
+        "slugs": ["create-ponder"]
+      }
+    },
+    {
+      "id": "custom-skin-loader",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "客户端皮肤加载 Mod，不应进入服务端。",
+      "match": {
+        "modIds": ["customskinloader"],
+        "slugs": ["customskinloader", "custom-skin-loader"]
+      }
+    },
+    {
+      "id": "advanced-loot-info",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "JEI/EMI/REI 客户端信息扩展，不应进入服务端。",
+      "match": {
+        "modIds": ["ali"],
+        "slugs": ["advanced-loot-info"]
+      }
+    },
+    {
+      "id": "tfc-support-indicator",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "客户端方块支撑提示 Mod，不应进入服务端。",
+      "match": {
+        "modIds": ["tfc_support_indicator"],
+        "slugs": ["tfc-support-indicator"]
+      }
+    },
+    {
+      "id": "tfc-weld-button",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "客户端 TFC 焊接界面按钮 Mod，不应进入服务端。",
+      "match": {
+        "modIds": ["tfcweldbutton"],
+        "slugs": ["tfc-weld-button"]
+      }
+    },
+    {
+      "id": "konkrete",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "客户端界面库，服务端包不需要携带。",
+      "match": {
+        "modIds": ["konkrete"],
+        "slugs": ["konkrete"]
+      }
+    },
+    {
+      "id": "lightspeed",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "客户端资源加载优化 Mod，在 dedicated server 上可能混入 client-only 类。",
+      "match": {
+        "modIds": ["lightspeed"],
+        "slugs": ["lightspeed"]
+      }
     }
   ]
 }

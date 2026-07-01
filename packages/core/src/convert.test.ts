@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import yazl from "yazl";
+import { appError } from "@mcsp/shared";
 import { listZipEntries } from "./archive/zip";
 import { runConversion } from "./convert";
 
@@ -62,7 +63,6 @@ describe("runConversion", () => {
         outputDir,
         settings: {
           cacheDir,
-          unknownPolicy: "manual-review",
           outputZip: true
         }
       },
@@ -79,8 +79,7 @@ describe("runConversion", () => {
       downloadedFiles: 1,
       missingUrlFiles: 1,
       includedFiles: 1,
-      excludedFiles: 1,
-      manualReviewFiles: 0
+      excludedFiles: 1
     });
     expect(result.report.files.map((file) => [file.fileName, file.downloadStatus, file.decision])).toEqual([
       ["server.jar", "downloaded", "include"],
@@ -204,67 +203,6 @@ describe("runConversion", () => {
     await expect(fs.readFile(result.reportPath, "utf8")).resolves.toContain('"downloadStatus": "failed"');
   });
 
-  it("uses manual review decisions when writing the serverpack", async () => {
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "mcsp-convert-user-decision-"));
-    const inputPath = path.join(dir, "pack.mrpack");
-    const outputDir = path.join(dir, "out");
-    const payload = await createJarBuffer({
-      "META-INF/mods.toml": 'modLoader="javafml"\n[[mods]]\nmodId="reviewed"\ndisplayName="Reviewed Mod"\n'
-    });
-
-    await writeZip(inputPath, {
-      "modrinth.index.json": JSON.stringify({
-        formatVersion: 1,
-        name: "Reviewed Pack",
-        dependencies: {
-          minecraft: "1.20.1",
-          fabric: "0.15.11"
-        },
-        files: [
-          {
-            path: "mods/reviewed.jar",
-            hashes: { sha1: hash("sha1", payload) },
-            downloads: ["https://example.invalid/reviewed.jar"]
-          }
-        ]
-      })
-    });
-
-    const result = await runConversion(
-      {
-        inputPath,
-        outputDir,
-        settings: {
-          unknownPolicy: "manual-review",
-          modDecisions: [
-            {
-              fileName: "reviewed.jar",
-              pathInPack: "mods/reviewed.jar",
-              source: "modrinth",
-              decision: "include",
-              reason: "用户复核：测试保留"
-            }
-          ]
-        }
-      },
-      {
-        fetchImpl: async () => new Response(payload)
-      }
-    );
-
-    expect(result.report.summary).toMatchObject({
-      includedFiles: 1,
-      manualReviewFiles: 0
-    });
-    expect(result.report.files[0]).toMatchObject({
-      fileName: "reviewed.jar",
-      decision: "include",
-      decisionReason: "用户复核：测试保留",
-      decisionSource: "user-rule"
-    });
-    await expect(fs.readFile(path.join(result.outputDir, "mods", "reviewed.jar"))).resolves.toEqual(payload);
-  });
-
   it("uses a user rule file when writing the serverpack", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "mcsp-convert-rule-file-"));
     const inputPath = path.join(dir, "pack.mrpack");
@@ -309,7 +247,6 @@ describe("runConversion", () => {
         inputPath,
         outputDir,
         settings: {
-          unknownPolicy: "manual-review",
           modRulesPath: rulesPath
         }
       },
@@ -319,8 +256,7 @@ describe("runConversion", () => {
     );
 
     expect(result.report.summary).toMatchObject({
-      includedFiles: 1,
-      manualReviewFiles: 0
+      includedFiles: 1
     });
     expect(result.report.files[0]).toMatchObject({
       fileName: "ruled.jar",
@@ -379,8 +315,7 @@ describe("runConversion", () => {
     );
 
     expect(result.report.summary).toMatchObject({
-      excludedFiles: 1,
-      manualReviewFiles: 0
+      excludedFiles: 1
     });
     expect(result.report.files[0]).toMatchObject({
       fileName: "5678.jar",
@@ -416,6 +351,7 @@ describe("runConversion", () => {
         settings: {
           downloadServerCore: true,
           testStartScript: true,
+          generateOptimizedStartScript: true,
           javaHome: configuredJavaHome
         }
       },
@@ -488,18 +424,116 @@ describe("runConversion", () => {
     expect(startPowerShell).toContain("java-home.txt");
     expect(startPowerShell).toContain("Read-ArgumentFile");
     expect(startPowerShell).toContain("Find-ForgeArgsFile");
-    expect(startPowerShell).toContain("& $JavaCmd $LaunchArgs");
+    expect(startPowerShell).toContain("& $JavaCmd @LaunchArgs");
     expect(startPowerShell).not.toContain("@user_jvm_args.txt");
     const startBatch = await fs.readFile(path.join(result.outputDir, "start.bat"), "utf8");
     expect(startBatch).toContain("java-home.txt");
+    expect(startBatch).toContain("for /r");
     expect(startBatch).toContain("win_args.txt");
     expect(startBatch).not.toContain("start.ps1");
     const startShell = await fs.readFile(path.join(result.outputDir, "start.sh"), "utf8");
     expect(startShell).toContain("java-home.txt");
     expect(startShell).toContain("unix_args.txt");
+    const optimizedStartBatch = await fs.readFile(path.join(result.outputDir, "start-optimized.bat"), "utf8");
+    expect(optimizedStartBatch).toContain("-XX:+UseG1GC");
+    expect(optimizedStartBatch).toContain("-Daikars.new.flags=true");
+    expect(optimizedStartBatch).not.toContain("user_jvm_args_optimized");
+    const optimizedStartShell = await fs.readFile(path.join(result.outputDir, "start-optimized.sh"), "utf8");
+    expect(optimizedStartShell).toContain("-XX:+UseG1GC");
+    expect(optimizedStartShell).toContain("-Daikars.new.flags=true");
+    expect(optimizedStartShell).not.toContain("user_jvm_args_optimized");
+    expect(result.report.serverpack.startScripts).toEqual(
+      expect.arrayContaining(["start.bat", "start.sh", "start-optimized.bat", "start-optimized.sh"])
+    );
+    await expect(fs.access(path.join(result.outputDir, "user_jvm_args_optimized.txt"))).rejects.toThrow();
     await expect(fs.readFile(result.readmePath, "utf8")).resolves.toContain("服务端核心已准备完成");
     expect(progressGroups).toContain("core");
     expect(logMessages).toContain("fake startup script reached EULA check");
+  });
+
+  it("writes diagnostics before failing when startup test fails", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "mcsp-convert-startup-failed-"));
+    const inputPath = path.join(dir, "vanilla.mrpack");
+    const outputDir = path.join(dir, "out");
+    const serverpackDir = path.join(outputDir, "Startup Failure Pack-serverpack");
+    const reportPath = path.join(serverpackDir, "conversion-report.json");
+    const serverJar = Buffer.from("server-jar");
+
+    await writeZip(inputPath, {
+      "modrinth.index.json": JSON.stringify({
+        formatVersion: 1,
+        name: "Startup Failure Pack",
+        dependencies: {
+          minecraft: "1.20.1"
+        },
+        files: []
+      })
+    });
+
+    await expect(
+      runConversion(
+        {
+          inputPath,
+          outputDir,
+          settings: {
+            downloadServerCore: true,
+            testStartScript: true,
+            outputZip: true,
+            generateOptimizedStartScript: true
+          }
+        },
+        {
+          fetchImpl: async (input) => {
+            const url = String(input);
+            if (url.endsWith("version_manifest_v2.json")) {
+              return new Response(
+                JSON.stringify({
+                  versions: [{ id: "1.20.1", url: "https://example.invalid/1.20.1.json" }]
+                })
+              );
+            }
+            if (url.endsWith("1.20.1.json")) {
+              return new Response(
+                JSON.stringify({
+                  downloads: {
+                    server: {
+                      url: "https://example.invalid/server.jar"
+                    }
+                  }
+                })
+              );
+            }
+            if (url.endsWith("server.jar")) {
+              return new Response(serverJar);
+            }
+            return new Response("not found", { status: 404 });
+          },
+          startupTestRunner: async () => {
+            throw appError("E_STARTUP_TEST_FAILED", "fake startup failed");
+          }
+        }
+      )
+    ).rejects.toMatchObject({
+      code: "E_STARTUP_TEST_FAILED",
+      message: "fake startup failed",
+      detail: {
+        outputDir: serverpackDir,
+        reportPath
+      }
+    });
+
+    const report = JSON.parse(await fs.readFile(reportPath, "utf8"));
+    expect(report.serverpack.startupTest).toMatchObject({
+      enabled: true,
+      status: "failed",
+      reason: "fake startup failed"
+    });
+    expect(report.errors).toEqual([expect.objectContaining({ code: "E_STARTUP_TEST_FAILED" })]);
+    expect(report.serverpack.zipPath).toBeUndefined();
+    await expect(fs.readFile(path.join(serverpackDir, "server.jar"))).resolves.toEqual(serverJar);
+    await expect(fs.access(path.join(serverpackDir, "start-optimized.bat"))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(serverpackDir, "README.md"))).resolves.toBeUndefined();
+    await expect(fs.access(`${serverpackDir}.zip`)).rejects.toThrow();
   });
 });
 

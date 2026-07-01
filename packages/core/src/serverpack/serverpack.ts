@@ -27,11 +27,13 @@ export interface GenerateServerpackOptions {
   core?: ServerCorePlan;
   coreInstall: ServerCoreInstallResult;
   javaHome?: string | undefined;
+  generateOptimizedStartScript?: boolean | undefined;
 }
 
 const installScripts = ["install-server.ps1", "install-server.bat", "install-server.sh"] as const;
 const startScripts = ["start.ps1", "start.bat", "start.sh"] as const;
 const supportFiles = ["server-core.json", "user_jvm_args.txt", "eula.txt", "server.properties"] as const;
+const optimizedStartScripts = ["start-optimized.bat", "start-optimized.sh"] as const;
 
 export async function generateServerpack(options: GenerateServerpackOptions): Promise<ServerpackGenerationResult> {
   const warnings: string[] = [];
@@ -55,9 +57,10 @@ export async function generateServerpack(options: GenerateServerpackOptions): Pr
   });
 
   await writeServerCoreFile(options.outputDir, core);
+  const shouldGenerateOptimizedStartScript = options.generateOptimizedStartScript ?? false;
   const writtenSupportFiles = await writeSupportFiles(options.outputDir, options.javaHome);
   await writeInstallScripts(options.outputDir, core);
-  await writeStartScripts(options.outputDir);
+  const writtenStartScripts = await writeStartScripts(options.outputDir, shouldGenerateOptimizedStartScript);
 
   return {
     core,
@@ -65,7 +68,7 @@ export async function generateServerpack(options: GenerateServerpackOptions): Pr
     skippedModFiles,
     mergedOverrideFiles,
     installScripts: [...installScripts],
-    startScripts: [...startScripts],
+    startScripts: writtenStartScripts,
     supportFiles: writtenSupportFiles,
     coreInstall: options.coreInstall,
     warnings
@@ -201,12 +204,25 @@ async function writeInstallScripts(outputDir: string, core: ServerCorePlan): Pro
   await chmodExecutable(shellPath);
 }
 
-async function writeStartScripts(outputDir: string): Promise<void> {
+async function writeStartScripts(outputDir: string, generateOptimizedStartScript: boolean): Promise<string[]> {
   await fs.writeFile(path.join(outputDir, "start.ps1"), renderStartPowerShell(), "utf8");
   await fs.writeFile(path.join(outputDir, "start.bat"), renderStartBatch(), "utf8");
   const shellPath = path.join(outputDir, "start.sh");
   await fs.writeFile(shellPath, renderStartShell(), "utf8");
   await chmodExecutable(shellPath);
+
+  if (!generateOptimizedStartScript) {
+    await Promise.all(
+      optimizedStartScripts.map((script) => fs.rm(path.join(outputDir, script), { force: true }))
+    );
+    return [...startScripts];
+  }
+
+  await fs.writeFile(path.join(outputDir, "start-optimized.bat"), renderStartBatch({ optimized: true }), "utf8");
+  const optimizedShellPath = path.join(outputDir, "start-optimized.sh");
+  await fs.writeFile(optimizedShellPath, renderStartShell({ optimized: true }), "utf8");
+  await chmodExecutable(optimizedShellPath);
+  return [...startScripts, ...optimizedStartScripts];
 }
 
 async function writeTextIfMissing(filePath: string, content: string): Promise<void> {
@@ -629,13 +645,14 @@ function renderStartPowerShell(): string {
     "  [void]$LaunchArgs.Add(\"nogui\")",
     "}",
     "",
-    "& $JavaCmd $LaunchArgs",
+    "& $JavaCmd @LaunchArgs",
     "exit $LASTEXITCODE",
     ""
   ].join("\n");
 }
 
-function renderStartBatch(): string {
+function renderStartBatch(options: { optimized?: boolean } = {}): string {
+  const jvmArgs = options.optimized ? optimizedJvmArgsForBatch() : '"@%~dp0user_jvm_args.txt"';
   return [
     "@echo off",
     "setlocal",
@@ -650,39 +667,39 @@ function renderStartBatch(): string {
     ")",
     "",
     "set \"FORGE_ARGS=\"",
-    "for /f \"delims=\" %%F in ('dir /b /s \"%~dp0libraries\\net\\minecraftforge\\forge\\*\\win_args.txt\" 2^>nul') do if not defined FORGE_ARGS set \"FORGE_ARGS=%%F\"",
-    "if not defined FORGE_ARGS for /f \"delims=\" %%F in ('dir /b /s \"%~dp0libraries\\net\\neoforged\\forge\\*\\win_args.txt\" 2^>nul') do if not defined FORGE_ARGS set \"FORGE_ARGS=%%F\"",
-    "if not defined FORGE_ARGS for /f \"delims=\" %%F in ('dir /b /s \"%~dp0libraries\\net\\neoforged\\neoforge\\*\\win_args.txt\" 2^>nul') do if not defined FORGE_ARGS set \"FORGE_ARGS=%%F\"",
+    "if exist \"%~dp0libraries\\net\\minecraftforge\\forge\" for /r \"%~dp0libraries\\net\\minecraftforge\\forge\" %%F in (win_args.txt) do if exist \"%%F\" if not defined FORGE_ARGS set \"FORGE_ARGS=%%F\"",
+    "if not defined FORGE_ARGS if exist \"%~dp0libraries\\net\\neoforged\\forge\" for /r \"%~dp0libraries\\net\\neoforged\\forge\" %%F in (win_args.txt) do if exist \"%%F\" if not defined FORGE_ARGS set \"FORGE_ARGS=%%F\"",
+    "if not defined FORGE_ARGS if exist \"%~dp0libraries\\net\\neoforged\\neoforge\" for /r \"%~dp0libraries\\net\\neoforged\\neoforge\" %%F in (win_args.txt) do if exist \"%%F\" if not defined FORGE_ARGS set \"FORGE_ARGS=%%F\"",
     "if defined FORGE_ARGS (",
     "  if \"%~1\"==\"\" (",
-    "    \"%JAVA_CMD%\" \"@%~dp0user_jvm_args.txt\" \"@%FORGE_ARGS%\" nogui",
+    `    "%JAVA_CMD%" ${jvmArgs} "@%FORGE_ARGS%" nogui`,
     "  ) else (",
-    "    \"%JAVA_CMD%\" \"@%~dp0user_jvm_args.txt\" \"@%FORGE_ARGS%\" %*",
+    `    "%JAVA_CMD%" ${jvmArgs} "@%FORGE_ARGS%" %*`,
     "  )",
     "  exit /b %ERRORLEVEL%",
     ")",
     "",
     "if exist fabric-server-launch.jar (",
     "  if \"%~1\"==\"\" (",
-    "    \"%JAVA_CMD%\" \"@%~dp0user_jvm_args.txt\" -jar fabric-server-launch.jar nogui",
+    `    "%JAVA_CMD%" ${jvmArgs} -jar fabric-server-launch.jar nogui`,
     "  ) else (",
-    "    \"%JAVA_CMD%\" \"@%~dp0user_jvm_args.txt\" -jar fabric-server-launch.jar %*",
+    `    "%JAVA_CMD%" ${jvmArgs} -jar fabric-server-launch.jar %*`,
     "  )",
     "  exit /b %ERRORLEVEL%",
     ")",
     "if exist quilt-server-launch.jar (",
     "  if \"%~1\"==\"\" (",
-    "    \"%JAVA_CMD%\" \"@%~dp0user_jvm_args.txt\" -jar quilt-server-launch.jar nogui",
+    `    "%JAVA_CMD%" ${jvmArgs} -jar quilt-server-launch.jar nogui`,
     "  ) else (",
-    "    \"%JAVA_CMD%\" \"@%~dp0user_jvm_args.txt\" -jar quilt-server-launch.jar %*",
+    `    "%JAVA_CMD%" ${jvmArgs} -jar quilt-server-launch.jar %*`,
     "  )",
     "  exit /b %ERRORLEVEL%",
     ")",
     "if exist server.jar (",
     "  if \"%~1\"==\"\" (",
-    "    \"%JAVA_CMD%\" \"@%~dp0user_jvm_args.txt\" -jar server.jar nogui",
+    `    "%JAVA_CMD%" ${jvmArgs} -jar server.jar nogui`,
     "  ) else (",
-    "    \"%JAVA_CMD%\" \"@%~dp0user_jvm_args.txt\" -jar server.jar %*",
+    `    "%JAVA_CMD%" ${jvmArgs} -jar server.jar %*`,
     "  )",
     "  exit /b %ERRORLEVEL%",
     ")",
@@ -692,7 +709,8 @@ function renderStartBatch(): string {
   ].join("\r\n");
 }
 
-function renderStartShell(): string {
+function renderStartShell(options: { optimized?: boolean } = {}): string {
+  const jvmArgs = options.optimized ? optimizedJvmArgsForShell() : '@"$PWD/user_jvm_args.txt"';
   return [
     "#!/usr/bin/env bash",
     "set -euo pipefail",
@@ -717,12 +735,12 @@ function renderStartShell(): string {
     "",
     "forge_args_file=\"$(find_forge_args_file || true)\"",
     "if [[ -n \"$forge_args_file\" ]]; then",
-    "  exec \"$JAVA_CMD\" @\"$PWD/user_jvm_args.txt\" @\"$forge_args_file\" \"${server_args[@]}\"",
+    `  exec "$JAVA_CMD" ${jvmArgs} @"$forge_args_file" "\${server_args[@]}"`,
     "fi",
     "",
     "for jar in fabric-server-launch.jar quilt-server-launch.jar server.jar; do",
     "  if [[ -f \"$jar\" ]]; then",
-    "    exec \"$JAVA_CMD\" @\"$PWD/user_jvm_args.txt\" -jar \"$jar\" \"${server_args[@]}\"",
+    `    exec "$JAVA_CMD" ${jvmArgs} -jar "$jar" "\${server_args[@]}"`,
     "  fi",
     "done",
     "",
@@ -730,6 +748,38 @@ function renderStartShell(): string {
     "exit 1",
     ""
   ].join("\n");
+}
+
+function optimizedJvmArgs(): string[] {
+  // Keep optimized flags inline so start-optimized.bat/sh remain standalone files.
+  return [
+    "-Xms4G",
+    "-Xmx4G",
+    "-XX:+UseG1GC",
+    "-XX:+ParallelRefProcEnabled",
+    "-XX:MaxGCPauseMillis=200",
+    "-XX:+UnlockExperimentalVMOptions",
+    "-XX:+DisableExplicitGC",
+    "-XX:+AlwaysPreTouch",
+    "-XX:G1HeapRegionSize=8M",
+    "-XX:G1ReservePercent=20",
+    "-XX:InitiatingHeapOccupancyPercent=15",
+    "-XX:+PerfDisableSharedMem",
+    "-Dusing.aikars.flags=https://mcflags.emc.gs",
+    "-Daikars.new.flags=true"
+  ];
+}
+
+function optimizedJvmArgsForBatch(): string {
+  return optimizedJvmArgs().join(" ");
+}
+
+function optimizedJvmArgsForShell(): string {
+  return optimizedJvmArgs().map(shellArg).join(" ");
+}
+
+function shellArg(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 function sanitizeFileName(fileName: string): string {

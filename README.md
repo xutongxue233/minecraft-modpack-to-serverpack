@@ -13,22 +13,22 @@ Keywords: Minecraft serverpack generator, Minecraft modpack converter, CurseForg
 - Enriches CurseForge `projectID/fileID` entries through the CurseForge API, so numeric entries become real file names.
 - Enriches Modrinth files through SHA-1 version lookup and project metadata.
 - Extracts JAR metadata from `fabric.mod.json`, `quilt.mod.json`, `META-INF/mods.toml`, `META-INF/neoforge.mods.toml`, and `mcmod.info`.
-- Provides a desktop Mod review list with search, decision filters, bulk include, bulk exclude, and row-level reset.
+- Automatically decides client-only Mods through a remote project-level rule library, user rule files, platform metadata, and JAR metadata.
 - Supports a GitHub-hosted project-level client Mod rule library and JSON/YAML user rule files for fixed include/exclude decisions by stable identifiers such as CurseForge project IDs, Modrinth project IDs, mod IDs, and slugs.
-- Produces a conversion report with file decisions, download status, hashes, warnings, and manual review items.
+- Produces a conversion report with file decisions, rule sources, download status, hashes, and warnings.
 - Keeps generating the first report even when individual downloads fail, marking those files as `failed`.
-- Shows a scrollable Mod list preview with full JAR file names and versions.
 - Generates a serverpack directory with selected `mods/`, server-safe overrides, `server-core.json`, EULA placeholder, JVM args, install scripts, and start scripts.
 - Optionally writes a distributable serverpack `.zip` next to the generated directory.
 - Selects the server core from pack metadata: Vanilla, Fabric, Quilt, Forge, or NeoForge, including Java version guidance.
 - Optional direct server core download/install, so generated packs can start from `start.bat` on Windows or `start.sh` on Linux/macOS after the EULA is accepted.
+- Optional optimized launch scripts, `start-optimized.bat` and `start-optimized.sh`, with JVM flags inlined and no extra optimized args file.
 - Startup script testing after direct core installation, with logs shown in the desktop task log; the test only verifies startup reaches the EULA gate and does not accept the EULA for you.
 - Configurable Java Home for local core installation; generated scripts persist it as `java-home.txt`, then fall back to `JAVA_HOME` and `java` on `PATH`.
 - Grouped progress for Mod downloads and server core downloads; Mod downloads show completed counts, percentages, and the current file, while core downloads keep byte progress.
 
 ## Current Status
 
-This project is in early MVP development. It now covers parsing, metadata enrichment, downloads, server-side filtering, remote project-level rules, manual review, user rule files, initial serverpack directory generation, optional direct server core installation, optional zip output, reports, and the desktop workflow. Richer packwiz remote metadata support and release packaging automation will continue to improve.
+This project is in early MVP development. It now covers parsing, metadata enrichment, downloads, automatic server-side Mod filtering, remote project-level rules, user rule files, initial serverpack directory generation, optional direct server core installation, optional optimized launch scripts, optional zip output, reports, and the desktop workflow. Richer packwiz remote metadata support and release packaging automation will continue to improve.
 
 ## Supported Modpack Formats
 
@@ -42,7 +42,7 @@ This project is in early MVP development. It now covers parsing, metadata enrich
 
 Many Minecraft modpacks are distributed as client-first packages. A server pack usually needs different behavior:
 
-- remove or review client-only mods;
+- remove known client-only mods by rule;
 - preserve server-side mods and shared mods;
 - merge server-safe overrides;
 - keep hashes and source metadata for auditability;
@@ -89,11 +89,15 @@ pnpm dist:win
 
 Artifacts are written to `apps/desktop/release/`. That directory is intentionally ignored by Git; publish binaries through GitHub Releases instead of committing them.
 
-## Mod Rule Files
+## API Key Security
 
-The desktop app enables a GitHub-hosted project-level rule library by default. The source file is `rules/client-mod-rules.json`; packaged builds fetch it through the GitHub raw URL and cache it locally. The remote library tracks stable project identifiers, not every file version, file ID, or hash.
+The desktop app does not embed a release CurseForge API key. Keys saved by users are encrypted with Electron `safeStorage` before being written to the local config; legacy plaintext config entries are migrated to encrypted storage on startup, or removed when secure storage is unavailable. Packaged builds use ASAR, compression, and JS minification, but those are not a security boundary for client-embedded secrets.
 
-The desktop app can also select `.json`, `.yaml`, or `.yml` user rule files. Priority is: remote rules < user rule file < per-run manual review decisions in the UI.
+## Mod Rule Library
+
+The desktop app always enables the GitHub-hosted project-level rule library. The source file is `rules/client-mod-rules.json`; packaged builds fetch it through the GitHub raw URL and cache it locally. The remote library tracks stable project identifiers, not every file version, file ID, or hash.
+
+The desktop app no longer exposes local rule-file selection. Rule fixes should be added to the remote rule library, and matched rules take priority over platform/JAR metadata heuristics.
 
 ```json
 {

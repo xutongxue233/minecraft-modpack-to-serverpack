@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
+  type AppError,
   type ConversionReport,
   type ConversionRequest,
   type ConversionResult,
@@ -224,9 +225,9 @@ export async function runConversion(
 
   emit({ type: "phase", jobId, phase: "reviewing", message: "正在生成服务端 Mod 决策" });
   const decisions = decideMods(analysis.files, {
-    unknownPolicy: request.settings?.unknownPolicy ?? "manual-review",
+    unknownPolicy: request.settings?.unknownPolicy ?? "include",
     metadataByFile: jarMetadataByFile,
-    overrides: [...remoteRules, ...fileRules, ...(request.settings?.modDecisions ?? [])]
+    overrides: [...remoteRules, ...fileRules]
   });
 
   emit({ type: "phase", jobId, phase: "packaging", message: "正在生成服务端目录、脚本和 overrides" });
@@ -238,7 +239,10 @@ export async function runConversion(
     downloadResultsByFile,
     core: serverCore,
     coreInstall,
-    ...(request.settings?.javaHome === undefined ? {} : { javaHome: request.settings.javaHome })
+    ...(request.settings?.javaHome === undefined ? {} : { javaHome: request.settings.javaHome }),
+    ...(request.settings?.generateOptimizedStartScript === undefined
+      ? {}
+      : { generateOptimizedStartScript: request.settings.generateOptimizedStartScript })
   });
   warnings.push(...serverpack.warnings);
 
@@ -247,25 +251,45 @@ export async function runConversion(
     status: "skipped",
     reason: shouldTestStartScript ? "服务端核心未直接安装，跳过启动脚本测试。" : "未启用启动脚本测试。"
   };
+  let deferredFailure: AppError | undefined;
 
   if (shouldTestStartScript && coreInstall.status === "installed") {
     emit({ type: "phase", jobId, phase: "testing", message: "正在运行启动脚本测试" });
     const startupTestRunner = options.startupTestRunner ?? runServerpackStartupTest;
-    startupTest = await startupTestRunner({
-      outputDir,
-      ...(request.settings?.startupTestTimeoutSeconds === undefined
-        ? {}
-        : { timeoutSeconds: request.settings.startupTestTimeoutSeconds }),
-      ...(request.settings?.javaHome === undefined ? {} : { javaHome: request.settings.javaHome }),
-      onLog: (level, message) => emit({ type: "log", jobId, level, message })
-    });
+    try {
+      startupTest = await startupTestRunner({
+        outputDir,
+        ...(request.settings?.startupTestTimeoutSeconds === undefined
+          ? {}
+          : { timeoutSeconds: request.settings.startupTestTimeoutSeconds }),
+        ...(request.settings?.javaHome === undefined ? {} : { javaHome: request.settings.javaHome }),
+        onLog: (level, message) => emit({ type: "log", jobId, level, message })
+      });
+    } catch (error) {
+      deferredFailure = unknownToAppError(error, "E_STARTUP_TEST_FAILED");
+      startupTest = {
+        enabled: true,
+        status: "failed",
+        reason: deferredFailure.message
+      };
+      warnings.push(`启动脚本测试失败：${deferredFailure.message}`);
+      emit({ type: "log", jobId, level: "error", message: `启动脚本测试失败：${deferredFailure.message}` });
+    }
   } else if (shouldTestStartScript) {
-    throw appError("E_STARTUP_TEST_SKIPPED", "已启用启动脚本测试，但服务端核心未安装成功。", {
+    deferredFailure = appError("E_STARTUP_TEST_SKIPPED", "已启用启动脚本测试，但服务端核心未安装成功。", {
       detail: { coreInstallStatus: coreInstall.status, coreInstallError: coreInstall.error },
       suggestion: "请开启“直接下载核心”并确认核心安装成功，或关闭“启动脚本测试”后只生成服务端包文件。"
     });
+    startupTest = {
+      enabled: true,
+      status: "failed",
+      reason: deferredFailure.message
+    };
+    warnings.push(`启动脚本测试跳过：${deferredFailure.message}`);
+    emit({ type: "log", jobId, level: "error", message: deferredFailure.message });
   }
 
+  const finalZipPath = deferredFailure === undefined ? zipPath : undefined;
   const report = buildConversionReport({
     request,
     analysis,
@@ -275,8 +299,9 @@ export async function runConversion(
     jarMetadataByFile,
     serverpack,
     startupTest,
-    ...(zipPath === undefined ? {} : { zipPath }),
+    ...(finalZipPath === undefined ? {} : { zipPath: finalZipPath }),
     warnings,
+    ...(deferredFailure === undefined ? {} : { errors: [deferredFailure] }),
     now: options.now ?? (() => new Date())
   });
 
@@ -284,9 +309,13 @@ export async function runConversion(
   await fs.writeFile(reportPath, JSON.stringify(report, null, 2), "utf8");
   await fs.writeFile(readmePath, renderReadme(report), "utf8");
 
-  if (zipPath) {
+  if (zipPath && deferredFailure === undefined) {
     emit({ type: "phase", jobId, phase: "packaging", message: "正在打包服务端 zip" });
     await createServerpackZip(outputDir, zipPath);
+  }
+
+  if (deferredFailure !== undefined) {
+    throw withFailureOutputDetail(deferredFailure, outputDir, reportPath);
   }
 
   emit({ type: "completed", jobId, outputDir, reportPath, ...(zipPath === undefined ? {} : { zipPath }) });
@@ -296,6 +325,24 @@ export async function runConversion(
     readmePath,
     ...(zipPath === undefined ? {} : { zipPath }),
     report
+  };
+}
+
+function withFailureOutputDetail(error: AppError, outputDir: string, reportPath: string): AppError {
+  const originalDetail =
+    typeof error.detail === "object" && error.detail !== null && !Array.isArray(error.detail)
+      ? error.detail
+      : error.detail === undefined
+        ? {}
+        : { cause: error.detail };
+
+  return {
+    ...error,
+    detail: {
+      ...originalDetail,
+      outputDir,
+      reportPath
+    }
   };
 }
 
@@ -348,6 +395,7 @@ function buildConversionReport({
   startupTest,
   zipPath,
   warnings,
+  errors = [],
   now
 }: {
   request: ConversionRequest;
@@ -360,13 +408,14 @@ function buildConversionReport({
   startupTest: StartupTestResult;
   zipPath?: string;
   warnings: string[];
+  errors?: AppError[];
   now: () => Date;
 }): ConversionReport {
   const files = analysis.files.map((file, index) => {
     const decision = decisions[index] ?? {
       fileName: file.fileName,
-      decision: "manual-review" as const,
-      reason: "缺少决策结果",
+      decision: "include" as const,
+      reason: "缺少决策结果，默认保留",
       source: "unknown" as const
     };
     const downloadResult = downloadResultsByFile.get(file);
@@ -408,7 +457,6 @@ function buildConversionReport({
   const failedDownloadFiles = files.filter((file) => file.downloadStatus === "failed").length;
   const includedFiles = files.filter((file) => file.decision === "include").length;
   const excludedFiles = files.filter((file) => file.decision === "exclude").length;
-  const manualReviewFiles = files.filter((file) => file.decision === "manual-review").length;
 
   return {
     schemaVersion: 1,
@@ -433,8 +481,7 @@ function buildConversionReport({
       missingUrlFiles,
       failedDownloadFiles,
       includedFiles,
-      excludedFiles,
-      manualReviewFiles
+      excludedFiles
     },
     serverpack: {
       core: {
@@ -465,7 +512,7 @@ function buildConversionReport({
       ...(zipPath === undefined ? {} : { zipPath })
     },
     warnings,
-    errors: []
+    errors
   };
 }
 
@@ -492,7 +539,6 @@ function renderReadme(report: ConversionReport): string {
     `- 缓存命中：${report.summary.cachedFiles}`,
     `- 缺少下载地址：${report.summary.missingUrlFiles}`,
     `- 下载失败：${report.summary.failedDownloadFiles}`,
-    `- 需要人工复核：${report.summary.manualReviewFiles}`,
     `- 已写入 mods：${report.serverpack.writtenModFiles}`,
     `- 已合并 overrides：${report.serverpack.mergedOverrideFiles}`,
     "",
@@ -512,10 +558,13 @@ function renderReadme(report: ConversionReport): string {
     "- 脚本会优先读取 `java-home.txt` 中的 Java Home；未配置时回退到 `JAVA_HOME` 和系统 `java`。",
     "- Linux/macOS 可尝试运行 `bash install-server.sh`，脚本依赖 `curl`、`python3` 和兼容 Java。",
     "- 安装完成后阅读并接受 Minecraft EULA，把 `eula.txt` 中的 `eula=false` 改为 `eula=true`。",
+    ...(report.serverpack.startScripts.includes("start-optimized.bat")
+      ? ["- 已生成优化启动脚本：Windows 可运行 `start-optimized.bat`，Linux/macOS 可运行 `start-optimized.sh`。"]
+      : []),
     "- 启动服务端请运行 `start.ps1`、`start.bat` 或 `start.sh`。",
     "- 内存参数在 `user_jvm_args.txt` 中调整，默认 `-Xms1G`、`-Xmx4G`。",
     "- Minecraft EULA 必须由服主自行确认，本工具不会自动设置 eula=true。",
-    "- 若报告中存在 manual-review 或 missing-url，请先处理后再生成最终服务端包。",
+    "- 若报告中存在 missing-url 或 failed，请补齐下载文件或调整规则后重新生成最终服务端包。",
     ""
   ].join("\n");
 }
