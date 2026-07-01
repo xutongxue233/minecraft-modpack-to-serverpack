@@ -26,6 +26,7 @@ export interface GenerateServerpackOptions {
   downloadResultsByFile: Map<ModFileDescriptor, DownloadResult>;
   core?: ServerCorePlan;
   coreInstall: ServerCoreInstallResult;
+  javaHome?: string | undefined;
 }
 
 const installScripts = ["install-server.ps1", "install-server.bat", "install-server.sh"] as const;
@@ -54,7 +55,7 @@ export async function generateServerpack(options: GenerateServerpackOptions): Pr
   });
 
   await writeServerCoreFile(options.outputDir, core);
-  await writeSupportFiles(options.outputDir);
+  const writtenSupportFiles = await writeSupportFiles(options.outputDir, options.javaHome);
   await writeInstallScripts(options.outputDir, core);
   await writeStartScripts(options.outputDir);
 
@@ -65,7 +66,7 @@ export async function generateServerpack(options: GenerateServerpackOptions): Pr
     mergedOverrideFiles,
     installScripts: [...installScripts],
     startScripts: [...startScripts],
-    supportFiles: [...supportFiles],
+    supportFiles: writtenSupportFiles,
     coreInstall: options.coreInstall,
     warnings
   };
@@ -161,7 +162,8 @@ async function writeServerCoreFile(outputDir: string, core: ServerCorePlan): Pro
   await fs.writeFile(path.join(outputDir, "server-core.json"), `${JSON.stringify(core, null, 2)}\n`, "utf8");
 }
 
-async function writeSupportFiles(outputDir: string): Promise<void> {
+async function writeSupportFiles(outputDir: string, javaHome?: string): Promise<string[]> {
+  const writtenSupportFiles: string[] = [...supportFiles];
   await writeTextIfMissing(
     path.join(outputDir, "user_jvm_args.txt"),
     ["-Xms1G", "-Xmx4G", ""].join("\n")
@@ -181,6 +183,14 @@ async function writeSupportFiles(outputDir: string): Promise<void> {
       ""
     ].join("\n")
   );
+
+  const normalizedJavaHome = javaHome?.trim();
+  if (normalizedJavaHome) {
+    await fs.writeFile(path.join(outputDir, "java-home.txt"), `${normalizedJavaHome}\n`, "utf8");
+    writtenSupportFiles.push("java-home.txt");
+  }
+
+  return writtenSupportFiles;
 }
 
 async function writeInstallScripts(outputDir: string, core: ServerCorePlan): Promise<void> {
@@ -314,13 +324,24 @@ function renderInstallPowerShell(core: ServerCorePlan): string {
     "  Invoke-WebRequest -Uri $Url -OutFile $Destination",
     "}",
     "",
+    "function Resolve-JavaHome {",
+    "  $JavaHomeFile = Join-Path $PSScriptRoot \"java-home.txt\"",
+    "  if (Test-Path $JavaHomeFile) {",
+    "    $ConfiguredJavaHome = (Get-Content -Raw $JavaHomeFile).Trim()",
+    "    if (-not [string]::IsNullOrWhiteSpace($ConfiguredJavaHome)) { return $ConfiguredJavaHome }",
+    "  }",
+    "  return $env:JAVA_HOME",
+    "}",
+    "",
     "function Resolve-JavaCommand {",
-    "  if (-not [string]::IsNullOrWhiteSpace($env:JAVA_HOME)) {",
-    "    $JavaBin = Join-Path $env:JAVA_HOME \"bin\"",
+    "  $JavaHome = Resolve-JavaHome",
+    "  if (-not [string]::IsNullOrWhiteSpace($JavaHome)) {",
+    "    $env:JAVA_HOME = $JavaHome",
+    "    $JavaBin = Join-Path $JavaHome \"bin\"",
     "    if (Test-Path $JavaBin) { $env:PATH = \"$JavaBin$([System.IO.Path]::PathSeparator)$env:PATH\" }",
-    "    $WindowsCandidate = Join-Path $env:JAVA_HOME \"bin/java.exe\"",
+    "    $WindowsCandidate = Join-Path $JavaHome \"bin/java.exe\"",
     "    if (Test-Path $WindowsCandidate) { return $WindowsCandidate }",
-    "    $UnixCandidate = Join-Path $env:JAVA_HOME \"bin/java\"",
+    "    $UnixCandidate = Join-Path $JavaHome \"bin/java\"",
     "    if (Test-Path $UnixCandidate) { return $UnixCandidate }",
     "  }",
     "  return \"java\"",
@@ -420,6 +441,7 @@ function renderInstallShell(core: ServerCorePlan): string {
     "INSTALLER_DIR=\".installer\"",
     "mkdir -p \"$INSTALLER_DIR\"",
     "JAVA_CMD=\"${JAVA_CMD:-java}\"",
+    "if [[ -f ./java-home.txt ]]; then JAVA_HOME=\"$(head -n 1 ./java-home.txt | tr -d '\\r')\"; fi",
     "if [[ -n \"${JAVA_HOME:-}\" && -x \"$JAVA_HOME/bin/java\" ]]; then JAVA_CMD=\"$JAVA_HOME/bin/java\"; export PATH=\"$JAVA_HOME/bin:$PATH\"; fi",
     "",
     "require_value() {",
@@ -521,13 +543,24 @@ function renderStartPowerShell(): string {
     "$ErrorActionPreference = \"Stop\"",
     "Set-Location $PSScriptRoot",
     "",
+    "function Resolve-JavaHome {",
+    "  $JavaHomeFile = Join-Path $PSScriptRoot \"java-home.txt\"",
+    "  if (Test-Path $JavaHomeFile) {",
+    "    $ConfiguredJavaHome = (Get-Content -Raw $JavaHomeFile).Trim()",
+    "    if (-not [string]::IsNullOrWhiteSpace($ConfiguredJavaHome)) { return $ConfiguredJavaHome }",
+    "  }",
+    "  return $env:JAVA_HOME",
+    "}",
+    "",
     "function Resolve-JavaCommand {",
-    "  if (-not [string]::IsNullOrWhiteSpace($env:JAVA_HOME)) {",
-    "    $JavaBin = Join-Path $env:JAVA_HOME \"bin\"",
+    "  $JavaHome = Resolve-JavaHome",
+    "  if (-not [string]::IsNullOrWhiteSpace($JavaHome)) {",
+    "    $env:JAVA_HOME = $JavaHome",
+    "    $JavaBin = Join-Path $JavaHome \"bin\"",
     "    if (Test-Path $JavaBin) { $env:PATH = \"$JavaBin$([System.IO.Path]::PathSeparator)$env:PATH\" }",
-    "    $WindowsCandidate = Join-Path $env:JAVA_HOME \"bin/java.exe\"",
+    "    $WindowsCandidate = Join-Path $JavaHome \"bin/java.exe\"",
     "    if (Test-Path $WindowsCandidate) { return $WindowsCandidate }",
-    "    $UnixCandidate = Join-Path $env:JAVA_HOME \"bin/java\"",
+    "    $UnixCandidate = Join-Path $JavaHome \"bin/java\"",
     "    if (Test-Path $UnixCandidate) { return $UnixCandidate }",
     "  }",
     "  return \"java\"",
@@ -557,6 +590,9 @@ function renderStartBatch(): string {
     "@echo off",
     "setlocal",
     "cd /d \"%~dp0\"",
+    "if exist \"%~dp0java-home.txt\" (",
+    "  set /p JAVA_HOME=<\"%~dp0java-home.txt\"",
+    ")",
     "set \"JAVA_CMD=java\"",
     "if defined JAVA_HOME if exist \"%JAVA_HOME%\\bin\\java.exe\" (",
     "  set \"JAVA_CMD=%JAVA_HOME%\\bin\\java.exe\"",
@@ -590,6 +626,7 @@ function renderStartShell(): string {
     "set -euo pipefail",
     "cd \"$(dirname \"$0\")\"",
     "JAVA_CMD=\"${JAVA_CMD:-java}\"",
+    "if [[ -f ./java-home.txt ]]; then JAVA_HOME=\"$(head -n 1 ./java-home.txt | tr -d '\\r')\"; fi",
     "if [[ -n \"${JAVA_HOME:-}\" && -x \"$JAVA_HOME/bin/java\" ]]; then JAVA_CMD=\"$JAVA_HOME/bin/java\"; export PATH=\"$JAVA_HOME/bin:$PATH\"; fi",
     "",
     "if [[ -f ./run.sh ]]; then",

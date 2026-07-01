@@ -387,6 +387,7 @@ describe("runConversion", () => {
     const inputPath = path.join(dir, "vanilla.mrpack");
     const outputDir = path.join(dir, "out");
     const serverJar = Buffer.from("server-jar");
+    const configuredJavaHome = path.join(dir, "jdk17");
     const progressGroups: string[] = [];
     const logMessages: string[] = [];
 
@@ -407,7 +408,8 @@ describe("runConversion", () => {
         outputDir,
         settings: {
           downloadServerCore: true,
-          testStartScript: true
+          testStartScript: true,
+          javaHome: configuredJavaHome
         }
       },
       {
@@ -472,8 +474,14 @@ describe("runConversion", () => {
       exitCode: 1
     });
     const startPowerShell = await fs.readFile(path.join(result.outputDir, "start.ps1"), "utf8");
+    await expect(fs.readFile(path.join(result.outputDir, "java-home.txt"), "utf8")).resolves.toBe(
+      `${configuredJavaHome}\n`
+    );
+    expect(startPowerShell).toContain("Resolve-JavaHome");
+    expect(startPowerShell).toContain("java-home.txt");
     expect(startPowerShell).toContain('$LaunchArgs = @("@user_jvm_args.txt", "-jar", $Jar, "nogui")');
     expect(startPowerShell).toContain("& $JavaCmd @LaunchArgs");
+    await expect(fs.readFile(path.join(result.outputDir, "start.bat"), "utf8")).resolves.toContain("java-home.txt");
     await expect(fs.readFile(result.readmePath, "utf8")).resolves.toContain("服务端核心已准备完成");
     expect(progressGroups).toContain("core");
     expect(logMessages).toContain("fake startup script reached EULA check");
