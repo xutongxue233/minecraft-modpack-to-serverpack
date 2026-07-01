@@ -13,6 +13,7 @@
 - 通过 CurseForge API 把 `projectID/fileID` 数字条目补全为真实 Mod 名称、文件名和下载地址。
 - 通过 Modrinth SHA-1 version lookup 和项目元数据补全文件信息。
 - 从 JAR 中读取 `fabric.mod.json`、`quilt.mod.json`、`META-INF/mods.toml`、`META-INF/neoforge.mods.toml`、`mcmod.info`。
+- 桌面端提供 Mod 复核清单，支持搜索、按决策筛选、批量保留、批量排除和行级重置。
 - 生成转换报告，包含文件决策、下载状态、哈希、警告和人工复核项。
 - 单个 Mod 下载失败时仍会生成初版报告，并把对应文件标记为 `failed`。
 - Mod 清单预览支持滚动展示完整列表，并完整显示 JAR 文件名和版本。
@@ -25,7 +26,7 @@
 
 ## 当前状态
 
-项目处于 MVP 早期阶段。当前已经覆盖输入解析、平台元数据补全、下载校验、服务端 Mod 筛选、初版服务端目录生成、可选服务端核心直接安装、可选 zip 输出、报告生成和桌面工作流。packwiz 远程 metafile、人工复核工作流和发布自动化会继续完善。
+项目处于 MVP 早期阶段。当前已经覆盖输入解析、平台元数据补全、下载校验、服务端 Mod 筛选、人工复核、初版服务端目录生成、可选服务端核心直接安装、可选 zip 输出、报告生成和桌面工作流。packwiz 远程 metafile、用户规则文件和发布自动化会继续完善。
 
 ## 支持格式
 

@@ -13,6 +13,7 @@ Keywords: Minecraft serverpack generator, Minecraft modpack converter, CurseForg
 - Enriches CurseForge `projectID/fileID` entries through the CurseForge API, so numeric entries become real file names.
 - Enriches Modrinth files through SHA-1 version lookup and project metadata.
 - Extracts JAR metadata from `fabric.mod.json`, `quilt.mod.json`, `META-INF/mods.toml`, `META-INF/neoforge.mods.toml`, and `mcmod.info`.
+- Provides a desktop Mod review list with search, decision filters, bulk include, bulk exclude, and row-level reset.
 - Produces a conversion report with file decisions, download status, hashes, warnings, and manual review items.
 - Keeps generating the first report even when individual downloads fail, marking those files as `failed`.
 - Shows a scrollable Mod list preview with full JAR file names and versions.
@@ -25,7 +26,7 @@ Keywords: Minecraft serverpack generator, Minecraft modpack converter, CurseForg
 
 ## Current Status
 
-This project is in early MVP development. It now covers parsing, metadata enrichment, downloads, server-side filtering, initial serverpack directory generation, optional direct server core installation, optional zip output, reports, and the desktop workflow. Richer packwiz remote metadata support, user review workflows, and release packaging automation will continue to improve.
+This project is in early MVP development. It now covers parsing, metadata enrichment, downloads, server-side filtering, manual review, initial serverpack directory generation, optional direct server core installation, optional zip output, reports, and the desktop workflow. Richer packwiz remote metadata support, user rule files, and release packaging automation will continue to improve.
 
 ## Supported Modpack Formats
 
