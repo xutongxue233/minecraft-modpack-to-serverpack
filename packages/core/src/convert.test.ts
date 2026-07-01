@@ -140,8 +140,10 @@ describe("runConversion", () => {
     );
     const startPowerShell = await fs.readFile(path.join(result.outputDir, "start.ps1"), "utf8");
     expect(startPowerShell).toContain("$LaunchArgs");
-    expect(startPowerShell).not.toContain('& $JavaCmd "@user_jvm_args.txt"');
-    await expect(fs.readFile(path.join(result.outputDir, "start.bat"), "utf8")).resolves.toContain("JAVA_HOME");
+    expect(startPowerShell).toContain("Read-ArgumentFile");
+    expect(startPowerShell).toContain("win_args.txt");
+    expect(startPowerShell).not.toContain("@user_jvm_args.txt");
+    await expect(fs.readFile(path.join(result.outputDir, "start.bat"), "utf8")).resolves.toContain("start.ps1");
     await expect(fs.readFile(path.join(result.outputDir, "start.sh"), "utf8")).resolves.toContain("JAVA_CMD");
     expect(events).toContain("analyzing");
     expect(events).toContain("downloading");
@@ -479,9 +481,11 @@ describe("runConversion", () => {
     );
     expect(startPowerShell).toContain("Resolve-JavaHome");
     expect(startPowerShell).toContain("java-home.txt");
-    expect(startPowerShell).toContain('$LaunchArgs = @("@user_jvm_args.txt", "-jar", $Jar, "nogui")');
-    expect(startPowerShell).toContain("& $JavaCmd @LaunchArgs");
-    await expect(fs.readFile(path.join(result.outputDir, "start.bat"), "utf8")).resolves.toContain("java-home.txt");
+    expect(startPowerShell).toContain("Read-ArgumentFile");
+    expect(startPowerShell).toContain("Find-ForgeArgsFile");
+    expect(startPowerShell).toContain("& $JavaCmd $LaunchArgs");
+    expect(startPowerShell).not.toContain("@user_jvm_args.txt");
+    await expect(fs.readFile(path.join(result.outputDir, "start.bat"), "utf8")).resolves.toContain("start.ps1");
     await expect(fs.readFile(result.readmePath, "utf8")).resolves.toContain("服务端核心已准备完成");
     expect(progressGroups).toContain("core");
     expect(logMessages).toContain("fake startup script reached EULA check");
