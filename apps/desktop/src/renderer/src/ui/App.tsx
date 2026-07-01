@@ -294,7 +294,8 @@ export function App() {
   const reviewRows = useMemo<ModReviewRow[]>(() => {
     return (analysis?.files ?? []).map((file, index) => {
       const key = modFileKey(file, index);
-      const automaticDecision = findRuleDecision(file, modRuleIndex) ?? previewServerDecision(file);
+      const automaticDecision =
+        findRuleDecision(file, modRuleIndex) ?? previewServerDecision(file, settings?.unknownPolicy ?? "manual-review");
       const userDecision = reviewDecisions[key];
       return {
         file,
@@ -305,7 +306,7 @@ export function App() {
         ...(userDecision === undefined ? {} : { userDecision })
       };
     });
-  }, [analysis?.files, modRuleIndex, reviewDecisions]);
+  }, [analysis?.files, modRuleIndex, reviewDecisions, settings?.unknownPolicy]);
 
   const reviewSummary = useMemo(() => {
     return {
@@ -541,6 +542,24 @@ export function App() {
 
       const next = await window.serverpack.updateSettings({ remoteRulesEnabled: value });
       setSettings(next);
+    },
+    [settings]
+  );
+
+  const updateUnknownModReview = useCallback(
+    async (value: boolean) => {
+      if (!settings) {
+        return;
+      }
+
+      setError(null);
+      try {
+        const next = await window.serverpack.updateSettings({ unknownPolicy: value ? "manual-review" : "exclude" });
+        setSettings(next);
+        setSettingsMessage(value ? "未知 Mod 将进入人工复核" : "未知 Mod 将默认排除");
+      } catch (rawError) {
+        setError(formatError(rawError));
+      }
     },
     [settings]
   );
@@ -849,7 +868,12 @@ export function App() {
                 <span>输出 zip</span>
               </label>
               <label>
-                <input type="checkbox" checked readOnly />
+                <input
+                  type="checkbox"
+                  checked={(settings?.unknownPolicy ?? "manual-review") === "manual-review"}
+                  disabled={!settings}
+                  onChange={(event) => void updateUnknownModReview(event.currentTarget.checked)}
+                />
                 <span>未知 Mod 进入复核</span>
               </label>
             </div>
@@ -1324,14 +1348,17 @@ function inferInputKind(filePath: string): InputSelection["kind"] {
   return lowerPath.endsWith(".mrpack") || lowerPath.endsWith(".zip") ? "file" : "directory";
 }
 
-function previewServerDecision(file: ModFileDescriptor): "include" | "exclude" | "manual-review" {
+function previewServerDecision(
+  file: ModFileDescriptor,
+  unknownPolicy: ConversionSettings["unknownPolicy"]
+): "include" | "exclude" | "manual-review" {
   if (file.env?.server === "unsupported") {
     return "exclude";
   }
   if (file.env?.server === "required" || file.env?.server === "optional") {
     return "include";
   }
-  return "manual-review";
+  return unknownPolicy;
 }
 
 function decisionLabel(decision: "include" | "exclude" | "manual-review"): string {
