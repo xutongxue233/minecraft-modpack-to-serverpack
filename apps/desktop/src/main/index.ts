@@ -15,6 +15,7 @@ import {
   SettingsUpdateRequest,
   unknownToAppError
 } from "@mcsp/shared";
+import { loadModDecisionRules } from "@mcsp/core";
 import { WorkerJobManager } from "./worker-job-manager";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -130,6 +131,19 @@ function registerIpc(): void {
     return result.canceled ? null : (result.filePaths[0] ?? null);
   });
 
+  ipcMain.handle("dialog:select-mod-rules-file", async () => {
+    const result = await dialog.showOpenDialog({
+      title: "选择 Mod 规则文件",
+      properties: ["openFile"],
+      filters: [
+        { name: "Mod 规则文件", extensions: ["json", "yaml", "yml"] },
+        { name: "全部文件", extensions: ["*"] }
+      ]
+    });
+
+    return result.canceled ? null : (result.filePaths[0] ?? null);
+  });
+
   ipcMain.handle("job:analyze", async (_event, rawRequest) => {
     try {
       const request = AnalyzeRequestSchema.parse(rawRequest);
@@ -168,6 +182,15 @@ function registerIpc(): void {
       return toPublicSettings(next);
     } catch (error) {
       throw unknownToAppError(error, "E_SETTINGS_UPDATE_FAILED");
+    }
+  });
+
+  ipcMain.handle("rules:load", async (_event, rawRequest) => {
+    try {
+      const request = OpenPathRequestSchema.parse(rawRequest);
+      return await loadModDecisionRules(normalizeModRulesPath(request.path));
+    } catch (error) {
+      throw unknownToAppError(error, "E_RULES_LOAD_FAILED");
     }
   });
 
@@ -244,6 +267,9 @@ function withRuntimeConversionSettings(request: ConversionRequest, settings: Con
       ...(request.settings?.javaHome !== undefined || settings.javaHome !== undefined
         ? { javaHome: request.settings?.javaHome ?? settings.javaHome }
         : {}),
+      ...(request.settings?.modRulesPath !== undefined || settings.modRulesPath !== undefined
+        ? { modRulesPath: request.settings?.modRulesPath ?? settings.modRulesPath }
+        : {}),
       ...(request.settings?.modDecisions === undefined ? {} : { modDecisions: request.settings.modDecisions })
     }
   };
@@ -263,6 +289,7 @@ function mergeStoredSettings(current: StoredSettings, patch: SettingsUpdateReque
     curseForgeApiKey,
     curseForgeApiKeyConfigured: _configured,
     javaHome,
+    modRulesPath,
     ...publicPatch
   } = patch as SettingsUpdateRequest & {
     curseForgeApiKeyConfigured?: boolean;
@@ -284,6 +311,14 @@ function mergeStoredSettings(current: StoredSettings, patch: SettingsUpdateReque
       delete next.javaHome;
     }
   }
+  if (modRulesPath !== undefined) {
+    const normalized = normalizeModRulesPath(modRulesPath);
+    if (normalized) {
+      next.modRulesPath = normalized;
+    } else {
+      delete next.modRulesPath;
+    }
+  }
   return next;
 }
 
@@ -298,6 +333,30 @@ function normalizeJavaHome(javaHome: string | null): string | undefined {
     throw appError("E_INVALID_JAVA_HOME", "选择的目录不是有效的 Java Home。", {
       detail: { javaHome: normalized, expectedJava: javaCommand },
       suggestion: "请选择 JDK/JRE 根目录，例如 D:\\Environment\\JDK17，而不是 bin 目录。"
+    });
+  }
+
+  return normalized;
+}
+
+function normalizeModRulesPath(modRulesPath: string | null): string | undefined {
+  const normalized = modRulesPath?.trim() ?? "";
+  if (!normalized) {
+    return undefined;
+  }
+
+  const extension = path.extname(normalized).toLowerCase();
+  if (extension !== ".json" && extension !== ".yaml" && extension !== ".yml") {
+    throw appError("E_INVALID_MOD_RULES_FILE", "选择的 Mod 规则文件格式不受支持。", {
+      detail: { modRulesPath: normalized },
+      suggestion: "请选择 .json、.yaml 或 .yml 文件。"
+    });
+  }
+
+  if (!existsSync(normalized)) {
+    throw appError("E_INVALID_MOD_RULES_FILE", "选择的 Mod 规则文件不存在。", {
+      detail: { modRulesPath: normalized },
+      suggestion: "请选择本机存在的规则文件。"
     });
   }
 

@@ -45,7 +45,7 @@ export interface ModDecision {
 }
 
 export interface ModDecisionOverride {
-  fileName: string;
+  fileName?: string | undefined;
   decision: Exclude<ModDecisionValue, "manual-review">;
   reason?: string | undefined;
   pathInPack?: string | undefined;
@@ -68,6 +68,7 @@ export interface ConversionRequestSettings {
   downloadServerCore?: boolean | undefined;
   outputZip?: boolean | undefined;
   javaHome?: string | undefined;
+  modRulesPath?: string | undefined;
   modDecisions?: ModDecisionOverride[] | undefined;
 }
 
@@ -175,13 +176,17 @@ export interface ConversionSettings {
   downloadServerCore: boolean;
   outputZip: boolean;
   javaHome?: string;
+  modRulesPath?: string;
   theme: "system" | "light" | "dark";
   curseForgeApiKeyConfigured: boolean;
 }
 
-export type SettingsUpdateRequest = Partial<Omit<ConversionSettings, "curseForgeApiKeyConfigured" | "javaHome">> & {
+export type SettingsUpdateRequest = Partial<
+  Omit<ConversionSettings, "curseForgeApiKeyConfigured" | "javaHome" | "modRulesPath">
+> & {
   curseForgeApiKey?: string | null;
   javaHome?: string | null;
+  modRulesPath?: string | null;
 };
 
 export type ConversionPhase =

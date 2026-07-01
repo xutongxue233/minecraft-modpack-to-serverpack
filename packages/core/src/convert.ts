@@ -14,6 +14,7 @@ import { type DownloadOptions, type DownloadResult, downloadFileToCache } from "
 import { enrichAnalysisWithPlatformMetadata } from "./metadata/platform-metadata";
 import { decideMods } from "./mod-analysis/decisions";
 import { inferModNameFromFile, scanDownloadedJarMetadata, type JarModMetadata } from "./mod-analysis/jar-metadata";
+import { loadModDecisionRules } from "./mod-analysis/user-rules";
 import { prepareServerCore, skippedServerCoreInstallResult, type ServerCoreInstallResult } from "./serverpack/core-installer";
 import { selectServerCore } from "./serverpack/server-core";
 import { generateServerpack, type ServerpackGenerationResult } from "./serverpack/serverpack";
@@ -58,6 +59,11 @@ export async function runConversion(
   const missingUrlFiles = analysis.files.filter((file) => file.downloadUrls.length === 0);
   for (const file of missingUrlFiles) {
     warnings.push(`${file.fileName} 没有下载地址，当前报告会标记为 missing-url。`);
+  }
+
+  const fileRules = await loadModDecisionRules(request.settings?.modRulesPath);
+  if (fileRules.length > 0) {
+    emit({ type: "log", jobId, level: "info", message: `已读取 ${fileRules.length} 条用户规则。` });
   }
 
   const downloadableFiles = analysis.files.filter((file) => file.downloadUrls.length > 0);
@@ -189,7 +195,7 @@ export async function runConversion(
   const decisions = decideMods(analysis.files, {
     unknownPolicy: request.settings?.unknownPolicy ?? "manual-review",
     metadataByFile: jarMetadataByFile,
-    overrides: request.settings?.modDecisions ?? []
+    overrides: [...fileRules, ...(request.settings?.modDecisions ?? [])]
   });
 
   emit({ type: "phase", jobId, phase: "packaging", message: "正在生成服务端目录、脚本和 overrides" });

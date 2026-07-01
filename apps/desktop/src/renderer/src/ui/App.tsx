@@ -90,6 +90,7 @@ export function App() {
   const [apiKeyDraft, setApiKeyDraft] = useState("");
   const [apiKeySaving, setApiKeySaving] = useState(false);
   const [settingsMessage, setSettingsMessage] = useState<string | null>(null);
+  const [modRuleOverrides, setModRuleOverrides] = useState<ModDecisionOverride[]>([]);
   const [reviewDecisions, setReviewDecisions] = useState<Record<string, FinalModDecision>>({});
   const [reviewFilter, setReviewFilter] = useState<ReviewFilter>("all");
   const [reviewSearch, setReviewSearch] = useState("");
@@ -194,6 +195,35 @@ export function App() {
     });
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    setModRuleOverrides([]);
+
+    const rulesPath = settings?.modRulesPath;
+    if (!rulesPath || !window.serverpack) {
+      return () => {
+        active = false;
+      };
+    }
+
+    void window.serverpack
+      .loadModRules(rulesPath)
+      .then((rules) => {
+        if (active) {
+          setModRuleOverrides(rules);
+        }
+      })
+      .catch((rawError: unknown) => {
+        if (active) {
+          setError(formatError(rawError));
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [settings?.modRulesPath]);
+
   const totalMods = analysis?.files.length ?? 0;
   const loaderLabel = analysis?.metadata.loader ?? "未识别";
   const packTypeLabel = analysis ? sourceName[analysis.metadata.type] ?? analysis.metadata.type : "等待输入";
@@ -201,10 +231,12 @@ export function App() {
   const analysisWarnings = analysis?.warnings ?? [];
   const targetOutputDir = outputDir || settings?.defaultOutputDir || "";
 
+  const modRuleIndex = useMemo(() => buildRuleIndex(modRuleOverrides), [modRuleOverrides]);
+
   const reviewRows = useMemo<ModReviewRow[]>(() => {
     return (analysis?.files ?? []).map((file, index) => {
       const key = modFileKey(file, index);
-      const automaticDecision = previewServerDecision(file);
+      const automaticDecision = findRuleDecision(file, modRuleIndex) ?? previewServerDecision(file);
       const userDecision = reviewDecisions[key];
       return {
         file,
@@ -215,7 +247,7 @@ export function App() {
         ...(userDecision === undefined ? {} : { userDecision })
       };
     });
-  }, [analysis?.files, reviewDecisions]);
+  }, [analysis?.files, modRuleIndex, reviewDecisions]);
 
   const reviewSummary = useMemo(() => {
     return {
@@ -278,6 +310,13 @@ export function App() {
     }
     return compactPath(settings.javaHome, 64);
   }, [settings?.javaHome]);
+
+  const modRulesPath = useMemo(() => {
+    if (!settings?.modRulesPath) {
+      return "未配置，使用自动判断和本次人工复核";
+    }
+    return compactPath(settings.modRulesPath, 64);
+  }, [settings?.modRulesPath]);
 
   const applyInputSelection = useCallback((selected: InputSelection) => {
     setInput(selected);
@@ -363,6 +402,7 @@ export function App() {
           ...(settings?.downloadServerCore === undefined ? {} : { downloadServerCore: settings.downloadServerCore }),
           ...(settings?.outputZip === undefined ? {} : { outputZip: settings.outputZip }),
           ...(settings?.javaHome === undefined ? {} : { javaHome: settings.javaHome }),
+          ...(settings?.modRulesPath === undefined ? {} : { modRulesPath: settings.modRulesPath }),
           ...(reviewRows.some((row) => row.userDecision !== undefined)
             ? { modDecisions: reviewRows.filter(hasUserDecision).map(toDecisionOverride) }
             : {})
@@ -447,6 +487,42 @@ export function App() {
       const next = await window.serverpack.updateSettings({ javaHome: null });
       setSettings(next);
       setSettingsMessage("Java Home 已清除，将使用系统 PATH");
+    } catch (rawError) {
+      setError(formatError(rawError));
+    }
+  }, [settings]);
+
+  const selectModRulesFile = useCallback(async () => {
+    if (!settings) {
+      return;
+    }
+
+    setError(null);
+    setSettingsMessage(null);
+    try {
+      const selected = await window.serverpack.selectModRulesFile();
+      if (!selected) {
+        return;
+      }
+      const next = await window.serverpack.updateSettings({ modRulesPath: selected });
+      setSettings(next);
+      setSettingsMessage("Mod 规则文件已保存");
+    } catch (rawError) {
+      setError(formatError(rawError));
+    }
+  }, [settings]);
+
+  const clearModRulesFile = useCallback(async () => {
+    if (!settings) {
+      return;
+    }
+
+    setError(null);
+    setSettingsMessage(null);
+    try {
+      const next = await window.serverpack.updateSettings({ modRulesPath: null });
+      setSettings(next);
+      setSettingsMessage("Mod 规则文件已清除");
     } catch (rawError) {
       setError(formatError(rawError));
     }
@@ -693,6 +769,29 @@ export function App() {
                 )}
               </div>
               <p className="settings-message">用于直接下载核心时运行 Forge、Fabric、Quilt 安装器。</p>
+            </div>
+
+            <div className="rules-panel">
+              <div className="rules-title">
+                <FileText size={16} />
+                <span>Mod 规则文件</span>
+                <strong className={settings?.modRulesPath ? "configured" : ""}>
+                  {settings?.modRulesPath ? "已启用" : "未启用"}
+                </strong>
+              </div>
+              <div className="rules-row">
+                <output title={settings?.modRulesPath || undefined}>{modRulesPath}</output>
+                <button type="button" onClick={selectModRulesFile}>
+                  <FolderOpen size={15} />
+                  选择规则
+                </button>
+                {settings?.modRulesPath && (
+                  <button className="ghost" type="button" onClick={clearModRulesFile}>
+                    清除
+                  </button>
+                )}
+              </div>
+              <p className="settings-message">支持 JSON/YAML，规则会优先于自动判断；本次人工复核优先级最高。</p>
             </div>
 
             <div className="api-key-panel">
@@ -1029,6 +1128,49 @@ function modFileKey(file: ModFileDescriptor, index: number): string {
     file.versionId ?? "",
     file.fileName
   ].join("|");
+}
+
+function buildRuleIndex(overrides: ModDecisionOverride[]): Map<string, FinalModDecision> {
+  const index = new Map<string, FinalModDecision>();
+  for (const override of overrides) {
+    for (const key of modDecisionOverrideKeys(override)) {
+      index.set(key, override.decision);
+    }
+  }
+  return index;
+}
+
+function findRuleDecision(
+  file: ModFileDescriptor,
+  index: Map<string, FinalModDecision>
+): FinalModDecision | undefined {
+  for (const key of modDecisionFileKeys(file)) {
+    const decision = index.get(key);
+    if (decision) {
+      return decision;
+    }
+  }
+  return undefined;
+}
+
+function modDecisionFileKeys(file: ModFileDescriptor): string[] {
+  return [
+    ...(file.pathInPack ? [`path:${file.pathInPack}`] : []),
+    ...(file.projectId && file.fileId ? [`platform:${file.source}:${file.projectId}:${file.fileId}`] : []),
+    ...(file.versionId ? [`version:${file.source}:${file.versionId}`] : []),
+    `file:${file.fileName}`
+  ];
+}
+
+function modDecisionOverrideKeys(override: ModDecisionOverride): string[] {
+  return [
+    ...(override.pathInPack ? [`path:${override.pathInPack}`] : []),
+    ...(override.source && override.projectId && override.fileId
+      ? [`platform:${override.source}:${override.projectId}:${override.fileId}`]
+      : []),
+    ...(override.source && override.versionId ? [`version:${override.source}:${override.versionId}`] : []),
+    ...(override.fileName ? [`file:${override.fileName}`] : [])
+  ];
 }
 
 function compactPath(value: string, maxLength: number): string {

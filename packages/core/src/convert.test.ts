@@ -255,6 +255,72 @@ describe("runConversion", () => {
     await expect(fs.readFile(path.join(result.outputDir, "mods", "reviewed.jar"))).resolves.toEqual(payload);
   });
 
+  it("uses a user rule file when writing the serverpack", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "mcsp-convert-rule-file-"));
+    const inputPath = path.join(dir, "pack.mrpack");
+    const outputDir = path.join(dir, "out");
+    const rulesPath = path.join(dir, "rules.json");
+    const payload = await createJarBuffer({
+      "META-INF/mods.toml": 'modLoader="javafml"\n[[mods]]\nmodId="ruled"\ndisplayName="Ruled Mod"\n'
+    });
+
+    await writeZip(inputPath, {
+      "modrinth.index.json": JSON.stringify({
+        formatVersion: 1,
+        name: "Rule File Pack",
+        dependencies: {
+          minecraft: "1.20.1",
+          forge: "47.4.10"
+        },
+        files: [
+          {
+            path: "mods/ruled.jar",
+            hashes: { sha1: hash("sha1", payload) },
+            downloads: ["https://example.invalid/ruled.jar"]
+          }
+        ]
+      })
+    });
+    await fs.writeFile(
+      rulesPath,
+      JSON.stringify({
+        include: [
+          {
+            pathInPack: "mods/ruled.jar",
+            reason: "规则文件：服务端需要"
+          }
+        ]
+      }),
+      "utf8"
+    );
+
+    const result = await runConversion(
+      {
+        inputPath,
+        outputDir,
+        settings: {
+          unknownPolicy: "manual-review",
+          modRulesPath: rulesPath
+        }
+      },
+      {
+        fetchImpl: async () => new Response(payload)
+      }
+    );
+
+    expect(result.report.summary).toMatchObject({
+      includedFiles: 1,
+      manualReviewFiles: 0
+    });
+    expect(result.report.files[0]).toMatchObject({
+      fileName: "ruled.jar",
+      decision: "include",
+      decisionReason: "规则文件：服务端需要",
+      decisionSource: "user-rule"
+    });
+    await expect(fs.readFile(path.join(result.outputDir, "mods", "ruled.jar"))).resolves.toEqual(payload);
+  });
+
   it("can download a vanilla server core directly into the serverpack", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "mcsp-convert-core-"));
     const inputPath = path.join(dir, "vanilla.mrpack");

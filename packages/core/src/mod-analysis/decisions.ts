@@ -114,6 +114,6 @@ function decisionOverrideKeys(override: ModDecisionOverride): string[] {
       ? [`platform:${override.source}:${override.projectId}:${override.fileId}`]
       : []),
     ...(override.source && override.versionId ? [`version:${override.source}:${override.versionId}`] : []),
-    `file:${override.fileName}`
+    ...(override.fileName ? [`file:${override.fileName}`] : [])
   ];
 }

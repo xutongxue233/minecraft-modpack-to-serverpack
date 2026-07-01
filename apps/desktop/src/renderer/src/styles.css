@@ -440,7 +440,8 @@ h2 {
 }
 
 .api-key-panel,
-.java-home-panel {
+.java-home-panel,
+.rules-panel {
   display: grid;
   gap: 7px;
   padding: 9px;
@@ -449,7 +450,8 @@ h2 {
 }
 
 .api-key-title,
-.java-home-title {
+.java-home-title,
+.rules-title {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -458,12 +460,14 @@ h2 {
 }
 
 .api-key-title svg,
-.java-home-title svg {
+.java-home-title svg,
+.rules-title svg {
   color: var(--lapis);
 }
 
 .api-key-title strong,
-.java-home-title strong {
+.java-home-title strong,
+.rules-title strong {
   margin-left: auto;
   padding: 2px 7px;
   border: 1px solid rgba(21, 24, 20, 0.18);
@@ -473,20 +477,23 @@ h2 {
 }
 
 .api-key-title strong.configured,
-.java-home-title strong.configured {
+.java-home-title strong.configured,
+.rules-title strong.configured {
   color: #2e5d28;
   background: rgba(121, 164, 95, 0.18);
 }
 
 .api-key-row,
-.java-home-row {
+.java-home-row,
+.rules-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 7px;
 }
 
 .api-key-row input,
-.java-home-row output {
+.java-home-row output,
+.rules-row output {
   min-width: 0;
   height: 34px;
   padding: 0 10px;
@@ -495,7 +502,8 @@ h2 {
   background: var(--bone);
 }
 
-.java-home-row output {
+.java-home-row output,
+.rules-row output {
   display: flex;
   align-items: center;
   overflow: hidden;
@@ -506,7 +514,8 @@ h2 {
 }
 
 .api-key-row button,
-.java-home-row button {
+.java-home-row button,
+.rules-row button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -521,13 +530,15 @@ h2 {
 }
 
 .api-key-row button.ghost,
-.java-home-row button.ghost {
+.java-home-row button.ghost,
+.rules-row button.ghost {
   color: rgba(21, 24, 20, 0.72);
   background: transparent;
 }
 
 .api-key-row button:disabled,
-.java-home-row button:disabled {
+.java-home-row button:disabled,
+.rules-row button:disabled {
   cursor: not-allowed;
   opacity: 0.58;
 }
