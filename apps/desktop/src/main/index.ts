@@ -13,9 +13,15 @@ import {
   ConversionRequest,
   ConversionSettings,
   SettingsUpdateRequest,
+  type PackMetadata,
   unknownToAppError
 } from "@mcsp/shared";
-import { loadModDecisionRules } from "@mcsp/core";
+import {
+  defaultRemoteModRulesUrl,
+  loadModDecisionRules,
+  loadRemoteModDecisionRules,
+  ruleContextFromMetadata
+} from "@mcsp/core";
 import { WorkerJobManager } from "./worker-job-manager";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -38,6 +44,8 @@ const defaultSettings: ConversionSettings = {
   downloadServerCore: false,
   testStartScript: true,
   startupTestTimeoutSeconds: 60,
+  remoteRulesEnabled: true,
+  remoteRulesUrl: defaultRemoteModRulesUrl,
   outputZip: false,
   theme: "system",
   curseForgeApiKeyConfigured: false
@@ -196,6 +204,23 @@ function registerIpc(): void {
     }
   });
 
+  ipcMain.handle("rules:load-remote", async (_event, rawRequest) => {
+    try {
+      const metadata = normalizePackMetadata(rawRequest);
+      const settings = await readSettings();
+      if (!settings.remoteRulesEnabled) {
+        return [];
+      }
+      return await loadRemoteModDecisionRules({
+        url: settings.remoteRulesUrl,
+        cacheDir: path.join(app.getPath("userData"), "cache", "rules"),
+        context: ruleContextFromMetadata(metadata)
+      });
+    } catch (error) {
+      throw unknownToAppError(error, "E_REMOTE_RULES_LOAD_FAILED");
+    }
+  });
+
   ipcMain.handle("path:open", async (_event, rawRequest) => {
     try {
       const request = OpenPathRequestSchema.parse(rawRequest);
@@ -267,6 +292,10 @@ function withRuntimeConversionSettings(request: ConversionRequest, settings: Con
       downloadServerCore: request.settings?.downloadServerCore ?? settings.downloadServerCore,
       testStartScript: request.settings?.testStartScript ?? settings.testStartScript,
       startupTestTimeoutSeconds: request.settings?.startupTestTimeoutSeconds ?? settings.startupTestTimeoutSeconds,
+      remoteRulesEnabled: request.settings?.remoteRulesEnabled ?? settings.remoteRulesEnabled,
+      remoteRulesUrl: request.settings?.remoteRulesUrl ?? settings.remoteRulesUrl,
+      remoteRulesCacheDir:
+        request.settings?.remoteRulesCacheDir ?? path.join(app.getPath("userData"), "cache", "rules"),
       outputZip: request.settings?.outputZip ?? settings.outputZip,
       ...(request.settings?.javaHome !== undefined || settings.javaHome !== undefined
         ? { javaHome: request.settings?.javaHome ?? settings.javaHome }
@@ -277,6 +306,17 @@ function withRuntimeConversionSettings(request: ConversionRequest, settings: Con
       ...(request.settings?.modDecisions === undefined ? {} : { modDecisions: request.settings.modDecisions })
     }
   };
+}
+
+function normalizePackMetadata(raw: unknown): PackMetadata {
+  if (typeof raw !== "object" || raw === null) {
+    throw appError("E_INVALID_METADATA", "远程规则加载缺少整合包元数据。", { recoverable: true });
+  }
+  const metadata = raw as Partial<PackMetadata>;
+  if (!metadata.type || !metadata.name) {
+    throw appError("E_INVALID_METADATA", "整合包元数据不完整，无法加载远程规则。", { recoverable: true });
+  }
+  return metadata as PackMetadata;
 }
 
 function toPublicSettings(stored: StoredSettings): ConversionSettings {

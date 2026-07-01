@@ -8,6 +8,7 @@ import type {
   JobId,
   ModDecisionOverride,
   OpenPathResult,
+  PackMetadata,
   SettingsUpdateRequest
 } from "@mcsp/shared";
 
@@ -26,6 +27,7 @@ declare global {
       getSettings: () => Promise<ConversionSettings>;
       updateSettings: (settings: SettingsUpdateRequest) => Promise<ConversionSettings>;
       loadModRules: (path: string) => Promise<ModDecisionOverride[]>;
+      loadRemoteModRules: (metadata: PackMetadata) => Promise<ModDecisionOverride[]>;
       openPath: (path: string) => Promise<OpenPathResult>;
       resolveDroppedFile: (file: File) => string;
       minimizeWindow: () => Promise<void>;

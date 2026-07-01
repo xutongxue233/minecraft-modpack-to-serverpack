@@ -96,6 +96,66 @@ describe("decideMods", () => {
       }
     ]);
   });
+
+  it("applies project-level rules across file versions", () => {
+    const file = modFile("modmenu-1.20.1-9.2.0.jar");
+    file.projectId = "mOgUt4GM";
+
+    expect(
+      decideMods([file], {
+        overrides: [
+          {
+            source: "modrinth",
+            projectId: "mOgUt4GM",
+            decision: "exclude",
+            decisionSource: "remote-rule",
+            reason: "远程项目规则 modmenu：排除"
+          }
+        ]
+      })
+    ).toEqual([
+      {
+        fileName: "modmenu-1.20.1-9.2.0.jar",
+        decision: "exclude",
+        reason: "远程项目规则 modmenu：排除",
+        source: "remote-rule"
+      }
+    ]);
+  });
+
+  it("applies mod id rules from jar metadata", () => {
+    const file = modFile("custom-name.jar");
+    const metadataByFile = new Map([
+      [
+        file,
+        {
+          modId: "modmenu",
+          source: "fabric.mod.json" as const
+        }
+      ]
+    ]);
+
+    expect(
+      decideMods([file], {
+        metadataByFile,
+        overrides: [
+          {
+            modId: "modmenu",
+            decision: "exclude",
+            decisionSource: "remote-rule",
+            reason: "远程项目规则 modmenu：排除"
+          }
+        ]
+      })
+    ).toEqual([
+      {
+        fileName: "custom-name.jar",
+        decision: "exclude",
+        reason: "远程项目规则 modmenu：排除",
+        source: "remote-rule"
+      }
+    ]);
+  });
 });
 
 function modFile(fileName: string, env?: ModFileDescriptor["env"]): ModFileDescriptor {

@@ -14,7 +14,7 @@
 - 通过 Modrinth SHA-1 version lookup 和项目元数据补全文件信息。
 - 从 JAR 中读取 `fabric.mod.json`、`quilt.mod.json`、`META-INF/mods.toml`、`META-INF/neoforge.mods.toml`、`mcmod.info`。
 - 桌面端提供 Mod 复核清单，支持搜索、按决策筛选、批量保留、批量排除和行级重置。
-- 支持 JSON/YAML 用户规则文件，按文件名、包内路径、CurseForge ID 或 Modrinth version ID 固定包含/排除规则。
+- 支持 GitHub 远程项目级客户端 Mod 规则库和 JSON/YAML 用户规则文件，按 CurseForge projectID、Modrinth projectID、modId、slug 等稳定标识固定包含/排除规则。
 - 生成转换报告，包含文件决策、下载状态、哈希、警告和人工复核项。
 - 单个 Mod 下载失败时仍会生成初版报告，并把对应文件标记为 `failed`。
 - Mod 清单预览支持滚动展示完整列表，并完整显示 JAR 文件名和版本。
@@ -28,7 +28,7 @@
 
 ## 当前状态
 
-项目处于 MVP 早期阶段。当前已经覆盖输入解析、平台元数据补全、下载校验、服务端 Mod 筛选、人工复核、用户规则文件、初版服务端目录生成、可选服务端核心直接安装、可选 zip 输出、报告生成和桌面工作流。packwiz 远程 metafile 和发布自动化会继续完善。
+项目处于 MVP 早期阶段。当前已经覆盖输入解析、平台元数据补全、下载校验、服务端 Mod 筛选、远程项目级规则库、人工复核、用户规则文件、初版服务端目录生成、可选服务端核心直接安装、可选 zip 输出、报告生成和桌面工作流。packwiz 远程 metafile 和发布自动化会继续完善。
 
 ## 支持格式
 
@@ -91,7 +91,9 @@ pnpm dist:win
 
 ## Mod 规则文件
 
-桌面端可以选择 `.json`、`.yaml` 或 `.yml` 规则文件。规则文件优先于自动判断，本次界面人工复核优先级最高。
+桌面端默认启用 GitHub 远程项目级规则库，规则库文件位于 `rules/client-mod-rules.json`，发布后会通过 GitHub raw URL 拉取并缓存到本机。远程规则维护的是项目级稳定标识，不维护每个版本的 `fileID` 或 hash。
+
+桌面端也可以选择 `.json`、`.yaml` 或 `.yml` 用户规则文件。优先级为：远程规则 < 用户规则文件 < 本次界面人工复核。
 
 ```json
 {
@@ -106,9 +108,18 @@ pnpm dist:win
   ],
   "rules": [
     {
-      "pathInPack": "mods/example.jar",
-      "decision": "include",
-      "reason": "server required"
+      "id": "modmenu",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "客户端 Mod 菜单，不需要进入服务端。",
+      "match": {
+        "modrinthProjectIds": ["mOgUt4GM"],
+        "curseforgeProjectIds": ["308702"],
+        "modIds": ["modmenu"],
+        "slugs": ["modmenu"]
+      },
+      "loaders": ["fabric", "quilt"],
+      "minecraftVersions": [">=1.16"]
     }
   ]
 }

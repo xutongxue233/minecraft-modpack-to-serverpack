@@ -97,6 +97,7 @@ export function App() {
   const [apiKeySaving, setApiKeySaving] = useState(false);
   const [settingsMessage, setSettingsMessage] = useState<string | null>(null);
   const [modRuleOverrides, setModRuleOverrides] = useState<ModDecisionOverride[]>([]);
+  const [remoteRuleOverrides, setRemoteRuleOverrides] = useState<ModDecisionOverride[]>([]);
   const [reviewDecisions, setReviewDecisions] = useState<Record<string, FinalModDecision>>({});
   const [reviewFilter, setReviewFilter] = useState<ReviewFilter>("all");
   const [reviewSearch, setReviewSearch] = useState("");
@@ -250,6 +251,34 @@ export function App() {
     };
   }, [settings?.modRulesPath]);
 
+  useEffect(() => {
+    let active = true;
+    setRemoteRuleOverrides([]);
+
+    if (!analysis || !settings?.remoteRulesEnabled || !window.serverpack) {
+      return () => {
+        active = false;
+      };
+    }
+
+    void window.serverpack
+      .loadRemoteModRules(analysis.metadata)
+      .then((rules) => {
+        if (active) {
+          setRemoteRuleOverrides(rules);
+        }
+      })
+      .catch((rawError: unknown) => {
+        if (active) {
+          setError(formatError(rawError));
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [analysis, settings?.remoteRulesEnabled, settings?.remoteRulesUrl]);
+
   const totalMods = analysis?.files.length ?? 0;
   const loaderLabel = analysis?.metadata.loader ?? "未识别";
   const packTypeLabel = analysis ? sourceName[analysis.metadata.type] ?? analysis.metadata.type : "等待输入";
@@ -257,7 +286,10 @@ export function App() {
   const analysisWarnings = analysis?.warnings ?? [];
   const targetOutputDir = outputDir || settings?.defaultOutputDir || "";
 
-  const modRuleIndex = useMemo(() => buildRuleIndex(modRuleOverrides), [modRuleOverrides]);
+  const modRuleIndex = useMemo(
+    () => buildRuleIndex([...remoteRuleOverrides, ...modRuleOverrides]),
+    [modRuleOverrides, remoteRuleOverrides]
+  );
 
   const reviewRows = useMemo<ModReviewRow[]>(() => {
     return (analysis?.files ?? []).map((file, index) => {
@@ -431,6 +463,8 @@ export function App() {
           ...(settings?.startupTestTimeoutSeconds === undefined
             ? {}
             : { startupTestTimeoutSeconds: settings.startupTestTimeoutSeconds }),
+          ...(settings?.remoteRulesEnabled === undefined ? {} : { remoteRulesEnabled: settings.remoteRulesEnabled }),
+          ...(settings?.remoteRulesUrl === undefined ? {} : { remoteRulesUrl: settings.remoteRulesUrl }),
           ...(settings?.outputZip === undefined ? {} : { outputZip: settings.outputZip }),
           ...(settings?.javaHome === undefined ? {} : { javaHome: settings.javaHome }),
           ...(settings?.modRulesPath === undefined ? {} : { modRulesPath: settings.modRulesPath }),
@@ -494,6 +528,18 @@ export function App() {
       }
 
       const next = await window.serverpack.updateSettings({ testStartScript: value });
+      setSettings(next);
+    },
+    [settings]
+  );
+
+  const updateRemoteRulesEnabled = useCallback(
+    async (value: boolean) => {
+      if (!settings) {
+        return;
+      }
+
+      const next = await window.serverpack.updateSettings({ remoteRulesEnabled: value });
       setSettings(next);
     },
     [settings]
@@ -785,6 +831,14 @@ export function App() {
                   onChange={(event) => void updateTestStartScript(event.currentTarget.checked)}
                 />
                 <span>启动脚本测试</span>
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={settings?.remoteRulesEnabled ?? true}
+                  onChange={(event) => void updateRemoteRulesEnabled(event.currentTarget.checked)}
+                />
+                <span>远程规则库</span>
               </label>
               <label>
                 <input
@@ -1226,7 +1280,9 @@ function modDecisionFileKeys(file: ModFileDescriptor): string[] {
   return [
     ...(file.pathInPack ? [`path:${file.pathInPack}`] : []),
     ...(file.projectId && file.fileId ? [`platform:${file.source}:${file.projectId}:${file.fileId}`] : []),
+    ...(file.projectId ? [`project:${file.source}:${file.projectId}`] : []),
     ...(file.versionId ? [`version:${file.source}:${file.versionId}`] : []),
+    ...(file.slug ? [`slug:${file.source}:${normalizeRuleValue(file.slug)}`, `slug:${normalizeRuleValue(file.slug)}`] : []),
     `file:${file.fileName}`
   ];
 }
@@ -1237,9 +1293,21 @@ function modDecisionOverrideKeys(override: ModDecisionOverride): string[] {
     ...(override.source && override.projectId && override.fileId
       ? [`platform:${override.source}:${override.projectId}:${override.fileId}`]
       : []),
+    ...(override.source && override.projectId ? [`project:${override.source}:${override.projectId}`] : []),
     ...(override.source && override.versionId ? [`version:${override.source}:${override.versionId}`] : []),
+    ...(override.modId ? [`modid:${normalizeRuleValue(override.modId)}`] : []),
+    ...(override.slug
+      ? [
+          ...(override.source ? [`slug:${override.source}:${normalizeRuleValue(override.slug)}`] : []),
+          `slug:${normalizeRuleValue(override.slug)}`
+        ]
+      : []),
     ...(override.fileName ? [`file:${override.fileName}`] : [])
   ];
+}
+
+function normalizeRuleValue(value: string): string {
+  return value.trim().toLowerCase();
 }
 
 function compactPath(value: string, maxLength: number): string {

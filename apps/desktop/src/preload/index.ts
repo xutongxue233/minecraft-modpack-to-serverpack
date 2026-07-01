@@ -9,6 +9,7 @@ import type {
   JobId,
   ModDecisionOverride,
   OpenPathResult,
+  PackMetadata,
   SettingsUpdateRequest
 } from "@mcsp/shared";
 
@@ -30,6 +31,8 @@ const api = {
   updateSettings: (settings: SettingsUpdateRequest): Promise<ConversionSettings> =>
     ipcRenderer.invoke("settings:update", settings),
   loadModRules: (path: string): Promise<ModDecisionOverride[]> => ipcRenderer.invoke("rules:load", { path }),
+  loadRemoteModRules: (metadata: PackMetadata): Promise<ModDecisionOverride[]> =>
+    ipcRenderer.invoke("rules:load-remote", metadata),
   openPath: (targetPath: string): Promise<OpenPathResult> => ipcRenderer.invoke("path:open", { path: targetPath }),
   resolveDroppedFile: (file: File): string => webUtils.getPathForFile(file),
   minimizeWindow: (): Promise<void> => ipcRenderer.invoke("window:minimize"),

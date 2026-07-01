@@ -14,7 +14,7 @@ Keywords: Minecraft serverpack generator, Minecraft modpack converter, CurseForg
 - Enriches Modrinth files through SHA-1 version lookup and project metadata.
 - Extracts JAR metadata from `fabric.mod.json`, `quilt.mod.json`, `META-INF/mods.toml`, `META-INF/neoforge.mods.toml`, and `mcmod.info`.
 - Provides a desktop Mod review list with search, decision filters, bulk include, bulk exclude, and row-level reset.
-- Supports JSON/YAML user rule files for fixed include/exclude decisions by file name, path in pack, CurseForge IDs, or Modrinth version IDs.
+- Supports a GitHub-hosted project-level client Mod rule library and JSON/YAML user rule files for fixed include/exclude decisions by stable identifiers such as CurseForge project IDs, Modrinth project IDs, mod IDs, and slugs.
 - Produces a conversion report with file decisions, download status, hashes, warnings, and manual review items.
 - Keeps generating the first report even when individual downloads fail, marking those files as `failed`.
 - Shows a scrollable Mod list preview with full JAR file names and versions.
@@ -28,7 +28,7 @@ Keywords: Minecraft serverpack generator, Minecraft modpack converter, CurseForg
 
 ## Current Status
 
-This project is in early MVP development. It now covers parsing, metadata enrichment, downloads, server-side filtering, manual review, user rule files, initial serverpack directory generation, optional direct server core installation, optional zip output, reports, and the desktop workflow. Richer packwiz remote metadata support and release packaging automation will continue to improve.
+This project is in early MVP development. It now covers parsing, metadata enrichment, downloads, server-side filtering, remote project-level rules, manual review, user rule files, initial serverpack directory generation, optional direct server core installation, optional zip output, reports, and the desktop workflow. Richer packwiz remote metadata support and release packaging automation will continue to improve.
 
 ## Supported Modpack Formats
 
@@ -91,7 +91,9 @@ Artifacts are written to `apps/desktop/release/`. That directory is intentionall
 
 ## Mod Rule Files
 
-The desktop app can select `.json`, `.yaml`, or `.yml` rule files. Rule files override automatic decisions; per-run manual review decisions in the UI have the highest priority.
+The desktop app enables a GitHub-hosted project-level rule library by default. The source file is `rules/client-mod-rules.json`; packaged builds fetch it through the GitHub raw URL and cache it locally. The remote library tracks stable project identifiers, not every file version, file ID, or hash.
+
+The desktop app can also select `.json`, `.yaml`, or `.yml` user rule files. Priority is: remote rules < user rule file < per-run manual review decisions in the UI.
 
 ```json
 {
@@ -106,9 +108,18 @@ The desktop app can select `.json`, `.yaml`, or `.yml` rule files. Rule files ov
   ],
   "rules": [
     {
-      "pathInPack": "mods/example.jar",
-      "decision": "include",
-      "reason": "server required"
+      "id": "modmenu",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "Client-side Mod menu; not needed on a server.",
+      "match": {
+        "modrinthProjectIds": ["mOgUt4GM"],
+        "curseforgeProjectIds": ["308702"],
+        "modIds": ["modmenu"],
+        "slugs": ["modmenu"]
+      },
+      "loaders": ["fabric", "quilt"],
+      "minecraftVersions": [">=1.16"]
     }
   ]
 }

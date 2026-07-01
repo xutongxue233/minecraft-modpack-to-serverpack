@@ -1,6 +1,7 @@
 export type PackType = "curseforge" | "modrinth" | "packwiz" | "instance";
 export type LoaderType = "forge" | "neoforge" | "fabric" | "quilt" | "vanilla";
 export type ModDecisionValue = "include" | "exclude" | "manual-review";
+export type RuleDecisionSource = "user-rule" | "remote-rule";
 
 export interface PackMetadata {
   type: PackType;
@@ -41,7 +42,7 @@ export interface ModDecision {
   fileName: string;
   decision: ModDecisionValue;
   reason: string;
-  source: "manifest" | "platform-api" | "jar-metadata" | "builtin-rule" | "user-rule" | "unknown";
+  source: "manifest" | "platform-api" | "jar-metadata" | "builtin-rule" | RuleDecisionSource | "unknown";
 }
 
 export interface ModDecisionOverride {
@@ -53,6 +54,10 @@ export interface ModDecisionOverride {
   projectId?: string | undefined;
   fileId?: string | undefined;
   versionId?: string | undefined;
+  modId?: string | undefined;
+  slug?: string | undefined;
+  ruleId?: string | undefined;
+  decisionSource?: RuleDecisionSource | undefined;
 }
 
 export interface AnalyzeRequest {
@@ -68,6 +73,9 @@ export interface ConversionRequestSettings {
   downloadServerCore?: boolean | undefined;
   testStartScript?: boolean | undefined;
   startupTestTimeoutSeconds?: number | undefined;
+  remoteRulesEnabled?: boolean | undefined;
+  remoteRulesUrl?: string | undefined;
+  remoteRulesCacheDir?: string | undefined;
   outputZip?: boolean | undefined;
   javaHome?: string | undefined;
   modRulesPath?: string | undefined;
@@ -184,6 +192,8 @@ export interface ConversionSettings {
   downloadServerCore: boolean;
   testStartScript: boolean;
   startupTestTimeoutSeconds: number;
+  remoteRulesEnabled: boolean;
+  remoteRulesUrl: string;
   outputZip: boolean;
   javaHome?: string;
   modRulesPath?: string;

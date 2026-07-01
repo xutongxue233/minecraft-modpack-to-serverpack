@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-07-01T00:00:00.000Z",
+  "rules": [
+    {
+      "id": "modmenu",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "客户端 Mod 菜单，不需要进入服务端。",
+      "match": {
+        "modrinthProjectIds": ["mOgUt4GM"],
+        "curseforgeProjectIds": ["308702"],
+        "modIds": ["modmenu"],
+        "slugs": ["modmenu"]
+      },
+      "loaders": ["fabric", "quilt"]
+    },
+    {
+      "id": "sodium",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "客户端渲染优化 Mod，不应进入服务端。",
+      "match": {
+        "modrinthProjectIds": ["AANobbMI"],
+        "modIds": ["sodium"],
+        "slugs": ["sodium"]
+      },
+      "loaders": ["fabric", "quilt"]
+    }
+  ]
+}

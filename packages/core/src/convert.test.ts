@@ -321,6 +321,64 @@ describe("runConversion", () => {
     await expect(fs.readFile(path.join(result.outputDir, "mods", "ruled.jar"))).resolves.toEqual(payload);
   });
 
+  it("uses remote project rules when deciding mods", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "mcsp-convert-remote-rules-"));
+    const inputPath = path.join(dir, "pack.zip");
+    const outputDir = path.join(dir, "out");
+    const remoteRulesCacheDir = path.join(dir, "rules-cache");
+
+    await writeZip(inputPath, {
+      "manifest.json": JSON.stringify({
+        manifestType: "minecraftModpack",
+        name: "Remote Rule Pack",
+        version: "1.0.0",
+        minecraft: {
+          version: "1.20.1",
+          modLoaders: [{ id: "forge-47.2.0", primary: true }]
+        },
+        files: [{ projectID: 1234, fileID: 5678 }]
+      })
+    });
+
+    const result = await runConversion(
+      {
+        inputPath,
+        outputDir,
+        settings: {
+          remoteRulesEnabled: true,
+          remoteRulesUrl: "https://example.invalid/client-mod-rules.json",
+          remoteRulesCacheDir
+        }
+      },
+      {
+        fetchImpl: async () =>
+          new Response(
+            JSON.stringify({
+              rules: [
+                {
+                  id: "client-cf-project",
+                  side: "client",
+                  match: {
+                    curseforgeProjectIds: ["1234"]
+                  }
+                }
+              ]
+            })
+          )
+      }
+    );
+
+    expect(result.report.summary).toMatchObject({
+      excludedFiles: 1,
+      manualReviewFiles: 0
+    });
+    expect(result.report.files[0]).toMatchObject({
+      fileName: "5678.jar",
+      decision: "exclude",
+      decisionSource: "remote-rule"
+    });
+  });
+
   it("can download a vanilla server core directly into the serverpack", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "mcsp-convert-core-"));
     const inputPath = path.join(dir, "vanilla.mrpack");

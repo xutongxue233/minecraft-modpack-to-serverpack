@@ -9,18 +9,26 @@ export const ModDecisionOverrideSchema = z
     source: z.enum(["curseforge", "modrinth", "direct", "local"]).optional(),
     projectId: z.string().optional(),
     fileId: z.string().optional(),
-    versionId: z.string().optional()
+    versionId: z.string().optional(),
+    modId: z.string().optional(),
+    slug: z.string().optional(),
+    ruleId: z.string().optional(),
+    decisionSource: z.enum(["user-rule", "remote-rule"]).optional()
   })
   .refine(
     (rule) =>
       Boolean(
         rule.fileName ||
           rule.pathInPack ||
+          rule.modId ||
+          rule.slug ||
+          (rule.source && rule.projectId) ||
           (rule.source && rule.projectId && rule.fileId) ||
           (rule.source && rule.versionId)
       ),
     {
-      message: "Mod decision override requires fileName, pathInPack, source/projectId/fileId, or source/versionId."
+      message:
+        "Mod decision override requires fileName, pathInPack, modId, slug, source/projectId, source/projectId/fileId, or source/versionId."
     }
   );
 
@@ -41,6 +49,9 @@ export const ConversionRequestSchema = z.object({
       downloadServerCore: z.boolean().optional(),
       testStartScript: z.boolean().optional(),
       startupTestTimeoutSeconds: z.number().int().min(5).max(600).optional(),
+      remoteRulesEnabled: z.boolean().optional(),
+      remoteRulesUrl: z.string().url().optional(),
+      remoteRulesCacheDir: z.string().optional(),
       outputZip: z.boolean().optional(),
       javaHome: z.string().optional(),
       modRulesPath: z.string().optional(),
@@ -66,6 +77,8 @@ export const UpdateSettingsRequestSchema = z.object({
   downloadServerCore: z.boolean().optional(),
   testStartScript: z.boolean().optional(),
   startupTestTimeoutSeconds: z.number().int().min(5).max(600).optional(),
+  remoteRulesEnabled: z.boolean().optional(),
+  remoteRulesUrl: z.string().url().optional(),
   outputZip: z.boolean().optional(),
   javaHome: z.string().nullable().optional(),
   modRulesPath: z.string().nullable().optional(),
