@@ -138,6 +138,9 @@ describe("runConversion", () => {
     await expect(fs.readFile(path.join(result.outputDir, "install-server.ps1"), "utf8")).resolves.toContain(
       "Resolve-JavaCommand"
     );
+    const startPowerShell = await fs.readFile(path.join(result.outputDir, "start.ps1"), "utf8");
+    expect(startPowerShell).toContain("$LaunchArgs");
+    expect(startPowerShell).not.toContain('& $JavaCmd "@user_jvm_args.txt"');
     await expect(fs.readFile(path.join(result.outputDir, "start.bat"), "utf8")).resolves.toContain("JAVA_HOME");
     await expect(fs.readFile(path.join(result.outputDir, "start.sh"), "utf8")).resolves.toContain("JAVA_CMD");
     expect(events).toContain("analyzing");
@@ -468,6 +471,9 @@ describe("runConversion", () => {
       status: "passed",
       exitCode: 1
     });
+    const startPowerShell = await fs.readFile(path.join(result.outputDir, "start.ps1"), "utf8");
+    expect(startPowerShell).toContain('$LaunchArgs = @("@user_jvm_args.txt", "-jar", $Jar, "nogui")');
+    expect(startPowerShell).toContain("& $JavaCmd @LaunchArgs");
     await expect(fs.readFile(result.readmePath, "utf8")).resolves.toContain("服务端核心已准备完成");
     expect(progressGroups).toContain("core");
     expect(logMessages).toContain("fake startup script reached EULA check");

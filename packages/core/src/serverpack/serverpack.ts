@@ -545,7 +545,8 @@ function renderStartPowerShell(): string {
     "  throw \"没有找到可启动的服务端核心。请先运行 install-server.ps1，或手动放入 server.jar。\"",
     "}",
     "",
-    "& $JavaCmd \"@user_jvm_args.txt\" -jar $Jar nogui",
+    "$LaunchArgs = @(\"@user_jvm_args.txt\", \"-jar\", $Jar, \"nogui\")",
+    "& $JavaCmd @LaunchArgs",
     "exit $LASTEXITCODE",
     ""
   ].join("\n");
