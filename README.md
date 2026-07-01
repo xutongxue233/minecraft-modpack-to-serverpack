@@ -21,7 +21,7 @@ Keywords: Minecraft serverpack generator, Minecraft modpack converter, CurseForg
 - Generates a serverpack directory with selected `mods/`, server-safe overrides, `server-core.json`, EULA placeholder, JVM args, install scripts, and start scripts.
 - Optionally writes a distributable serverpack `.zip` next to the generated directory.
 - Selects the server core from pack metadata: Vanilla, Fabric, Quilt, Forge, or NeoForge, including Java version guidance.
-- Optional direct server core download/install, so generated packs can start from `start.bat` / `start.ps1` after the EULA is accepted.
+- Optional direct server core download/install, so generated packs can start from `start.bat` on Windows or `start.sh` on Linux/macOS after the EULA is accepted.
 - Startup script testing after direct core installation, with logs shown in the desktop task log; the test only verifies startup reaches the EULA gate and does not accept the EULA for you.
 - Configurable Java Home for local core installation; generated scripts persist it as `java-home.txt`, then fall back to `JAVA_HOME` and `java` on `PATH`.
 - Grouped progress for Mod downloads and server core downloads; Mod downloads show completed counts, percentages, and the current file, while core downloads keep byte progress.

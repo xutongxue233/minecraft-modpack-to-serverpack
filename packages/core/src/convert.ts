@@ -507,7 +507,7 @@ function renderReadme(report: ConversionReport): string {
     "## 部署提示",
     "",
     report.serverpack.coreInstall.status === "installed"
-      ? "- 服务端核心已准备完成，接受 EULA 后可直接运行 `start.ps1` 或 `start.bat`。"
+      ? "- 服务端核心已准备完成，接受 EULA 后 Windows 可运行 `start.bat`，Linux/macOS 可运行 `start.sh`。"
       : "- 首次部署时运行 `install-server.ps1` 或 `install-server.bat` 下载并安装对应服务端核心。",
     "- 脚本会优先读取 `java-home.txt` 中的 Java Home；未配置时回退到 `JAVA_HOME` 和系统 `java`。",
     "- Linux/macOS 可尝试运行 `bash install-server.sh`，脚本依赖 `curl`、`python3` 和兼容 Java。",
