@@ -3,8 +3,14 @@ import path from "node:path";
 import { parse as parseToml } from "smol-toml";
 import { AnalyzeResult, appError, LoaderType, ModFileDescriptor, PackMetadata } from "@mcsp/shared";
 import { listZipEntries, readZipText } from "./archive/zip";
+import { assertSafeArchiveEntry } from "./security/paths";
 
 type UnknownRecord = Record<string, unknown>;
+type OverrideRoots = {
+  common?: string;
+  server?: string;
+  client?: string;
+};
 
 export async function analyzeInput(inputPath: string): Promise<AnalyzeResult> {
   const stat = await statInput(inputPath);
@@ -85,6 +91,11 @@ function parseModrinthIndex(text: string, entryNames: string[]): AnalyzeResult {
   const index = parseJsonRecord(text, "Modrinth 整合包清单", "modrinth.index.json");
   const dependencies = asRecord(index.dependencies);
   const files = asArray(index.files);
+  const overrideRoots: OverrideRoots = {
+    common: "overrides",
+    server: "server-overrides",
+    client: "client-overrides"
+  };
   const metadata: PackMetadata = {
     type: "modrinth",
     name: asString(index.name) ?? "Modrinth 整合包",
@@ -95,8 +106,11 @@ function parseModrinthIndex(text: string, entryNames: string[]): AnalyzeResult {
 
   return {
     metadata,
-    files: [...files.map(parseModrinthFile), ...collectLocalOverrideMods(entryNames, ["overrides/", "server-overrides/"])],
-    overrides: countOverrides(entryNames),
+    files: [
+      ...files.map(parseModrinthFile),
+      ...collectLocalOverrideMods(entryNames, [overrideRootToPrefix(overrideRoots.common), overrideRootToPrefix(overrideRoots.server)])
+    ],
+    overrides: countOverrides(entryNames, overrideRoots),
     warnings: []
   };
 }
@@ -135,6 +149,7 @@ function parseCurseForgeManifest(text: string, entryNames: string[]): AnalyzeRes
   const primaryLoader = modLoaders.map(asRecord).find((loader) => loader.primary === true) ?? asRecord(modLoaders[0]);
   const files = asArray(manifest.files);
   const loaderInfo = parseCurseForgeLoader(asString(primaryLoader.id));
+  const commonOverrideRoot = normalizeOverrideRoot(asString(manifest.overrides), "overrides");
 
   return {
     metadata: {
@@ -160,9 +175,9 @@ function parseCurseForgeManifest(text: string, entryNames: string[]): AnalyzeRes
           metadataSource: "manifest"
         };
       }),
-      ...collectLocalOverrideMods(entryNames, ["overrides/"])
+      ...collectLocalOverrideMods(entryNames, [overrideRootToPrefix(commonOverrideRoot)])
     ],
-    overrides: countOverrides(entryNames),
+    overrides: countOverrides(entryNames, { common: commonOverrideRoot }),
     warnings: []
   };
 }
@@ -251,12 +266,37 @@ function normalizeEnv(value: string): "required" | "optional" | "unsupported" | 
   return undefined;
 }
 
-function countOverrides(entryNames: string[]) {
-  return {
-    common: entryNames.filter((entry) => entry.startsWith("overrides/") && !entry.endsWith("/")).length,
-    server: entryNames.filter((entry) => entry.startsWith("server-overrides/") && !entry.endsWith("/")).length,
-    client: entryNames.filter((entry) => entry.startsWith("client-overrides/") && !entry.endsWith("/")).length
+function countOverrides(entryNames: string[], roots: OverrideRoots): AnalyzeResult["overrides"] {
+  const result: AnalyzeResult["overrides"] = {
+    common: countOverrideFiles(entryNames, roots.common),
+    server: countOverrideFiles(entryNames, roots.server),
+    client: countOverrideFiles(entryNames, roots.client)
   };
+
+  if (roots.common !== undefined) {
+    result.commonPath = roots.common;
+  }
+  if (roots.server !== undefined) {
+    result.serverPath = roots.server;
+  }
+  if (roots.client !== undefined) {
+    result.clientPath = roots.client;
+  }
+
+  return result;
+}
+
+function countOverrideFiles(entryNames: string[], root: string | undefined): number {
+  if (root === undefined) {
+    return 0;
+  }
+
+  const prefix = overrideRootToPrefix(root);
+  return entryNames.filter((entry) => isInsideOverrideRoot(entry, prefix) && !entry.endsWith("/")).length;
+}
+
+function isInsideOverrideRoot(entryName: string, prefix: string): boolean {
+  return prefix === "" || entryName.startsWith(prefix);
 }
 
 function collectLocalOverrideMods(entryNames: string[], overridePrefixes: string[]): ModFileDescriptor[] {
@@ -278,7 +318,29 @@ function isLocalOverrideMod(entryName: string, overridePrefixes: string[]): bool
     return false;
   }
 
-  return overridePrefixes.some((prefix) => lower.startsWith(`${prefix}mods/`));
+  return overridePrefixes.some((prefix) => lower.startsWith(`${prefix.toLowerCase()}mods/`));
+}
+
+function normalizeOverrideRoot(value: string | undefined, fallback: string): string {
+  const raw = (value ?? fallback)
+    .trim()
+    .replaceAll("\\", "/")
+    .replace(/^\.\/+/, "")
+    .replace(/^\/+/, "")
+    .replace(/\/+$/g, "");
+
+  if (!raw || raw === ".") {
+    return "";
+  }
+
+  return assertSafeArchiveEntry(raw);
+}
+
+function overrideRootToPrefix(root: string | undefined): string {
+  if (root === undefined || root === "") {
+    return "";
+  }
+  return `${root}/`;
 }
 
 function asRecord(value: unknown): UnknownRecord {

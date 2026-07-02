@@ -95,6 +95,9 @@ export interface AnalyzeResult {
     common: number;
     server: number;
     client: number;
+    commonPath?: string;
+    serverPath?: string;
+    clientPath?: string;
   };
   warnings: string[];
 }

@@ -135,23 +135,26 @@ async function mergeOverrides({
   );
 
   if (analysis.metadata.type === "modrinth") {
+    const commonPrefix = overrideRootToPrefix(analysis.overrides.commonPath, "overrides");
+    const serverPrefix = overrideRootToPrefix(analysis.overrides.serverPath, "server-overrides");
     const common = await extractZipEntries(inputPath, outputDir, {
-      prefixes: ["overrides/"],
-      stripPrefix: "overrides/",
+      prefixes: [commonPrefix],
+      stripPrefix: commonPrefix,
       shouldExtract: makeServerOverrideFilter(warnings, localModEntryNames)
     });
     const server = await extractZipEntries(inputPath, outputDir, {
-      prefixes: ["server-overrides/"],
-      stripPrefix: "server-overrides/",
+      prefixes: [serverPrefix],
+      stripPrefix: serverPrefix,
       shouldExtract: makeServerOverrideFilter(warnings, localModEntryNames)
     });
     return common.length + server.length;
   }
 
   if (analysis.metadata.type === "curseforge") {
+    const commonPrefix = overrideRootToPrefix(analysis.overrides.commonPath, "overrides");
     const common = await extractZipEntries(inputPath, outputDir, {
-      prefixes: ["overrides/"],
-      stripPrefix: "overrides/",
+      prefixes: [commonPrefix],
+      stripPrefix: commonPrefix,
       shouldExtract: makeServerOverrideFilter(warnings, localModEntryNames)
     });
     return common.length;
@@ -163,6 +166,21 @@ async function mergeOverrides({
   }
 
   return 0;
+}
+
+function overrideRootToPrefix(root: string | undefined, fallback: string): string {
+  const raw = (root ?? fallback)
+    .trim()
+    .replaceAll("\\", "/")
+    .replace(/^\.\/+/, "")
+    .replace(/^\/+/, "")
+    .replace(/\/+$/g, "");
+
+  if (!raw || raw === ".") {
+    return "";
+  }
+
+  return `${raw}/`;
 }
 
 async function writeServerCoreFile(outputDir: string, core: ServerCorePlan): Promise<void> {

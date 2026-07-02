@@ -208,14 +208,10 @@ export function App() {
   const analysisWarnings = analysis?.warnings ?? [];
   const targetOutputDir = outputDir || settings?.defaultOutputDir || "";
   const overrideTotal = analysis ? analysis.overrides.common + analysis.overrides.server : 0;
-  const packName = analysis?.metadata.name ?? "等待解析";
   const minecraftLabel = analysis?.metadata.minecraftVersion ?? "未指定";
-  const loaderSummary =
-    analysis?.metadata.loader === undefined
-      ? "未识别加载器"
-      : `${loaderLabel}${analysis.metadata.loaderVersion ? ` ${analysis.metadata.loaderVersion}` : ""}`;
-  const modCountLabel = analysis ? `${totalMods} 个` : "0 个";
-  const overrideCountLabel = analysis ? `${overrideTotal} 个` : "0 个";
+  const modCountLabel = analysis ? `${totalMods} 个 Mod 文件` : "0 个";
+  const overrideCountLabel = analysis ? `${overrideTotal} 个实例覆盖文件` : "0 个";
+  const overrideDetailLabel = analysis ? formatOverrideBreakdown(analysis) : "等待解析";
 
   const selectedPath = useMemo(() => {
     if (!input) {
@@ -731,8 +727,9 @@ export function App() {
                 <Readout label="Minecraft 版本" value={minecraftLabel} />
                 <Readout label="Mod 加载器" value={loaderLabel} />
                 <Readout label="加载器版本" value={analysis?.metadata.loaderVersion ?? "未指定"} />
-                <Readout label="Mod 数量" value={modCountLabel} />
-                <Readout label="覆盖文件" value={overrideCountLabel} />
+                <Readout label="Mod 文件" value={modCountLabel} />
+                <Readout label="实例覆盖" value={overrideCountLabel} />
+                <Readout label="覆盖目录" value={overrideDetailLabel} wide />
               </dl>
             </div>
 
@@ -829,6 +826,28 @@ function Readout({ label, value, wide = false }: { label: string; value: string;
       <dd>{value}</dd>
     </div>
   );
+}
+
+function formatOverrideBreakdown(analysis: AnalyzeResult): string {
+  const parts: string[] = [];
+  const commonLabel = formatOverrideRoot(analysis.overrides.commonPath ?? "overrides");
+  parts.push(`${commonLabel} ${analysis.overrides.common}`);
+
+  if (analysis.overrides.serverPath !== undefined || analysis.overrides.server > 0) {
+    const serverLabel = formatOverrideRoot(analysis.overrides.serverPath ?? "server-overrides");
+    parts.push(`${serverLabel} ${analysis.overrides.server}`);
+  }
+
+  if (analysis.overrides.clientPath !== undefined || analysis.overrides.client > 0) {
+    const clientLabel = formatOverrideRoot(analysis.overrides.clientPath ?? "client-overrides");
+    parts.push(`${clientLabel} ${analysis.overrides.client}（服务端忽略）`);
+  }
+
+  return parts.join(" / ");
+}
+
+function formatOverrideRoot(root: string): string {
+  return root ? root : "实例根目录";
 }
 
 function ProgressBar({ group, progress }: { group: JobProgressGroup; progress: ProgressSnapshot }) {

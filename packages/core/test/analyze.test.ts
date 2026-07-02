@@ -111,6 +111,43 @@ describe("analyzeInput", () => {
     expect(result.overrides.common).toBe(2);
   });
 
+  it("uses the CurseForge manifest overrides directory when it is customized", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "mcsp-curseforge-custom-overrides-"));
+    const archivePath = path.join(dir, "pack.zip");
+
+    await writeZip(archivePath, {
+      "manifest.json": JSON.stringify({
+        manifestType: "minecraftModpack",
+        name: "Custom Overrides Pack",
+        minecraft: {
+          version: "1.20.1",
+          modLoaders: [{ id: "forge-47.2.0", primary: true }]
+        },
+        overrides: "minecraft",
+        files: []
+      }),
+      "minecraft/mods/local-server.jar": "fake jar",
+      "minecraft/config/example.toml": "enabled = true",
+      "overrides/config/ignored.toml": "wrong directory"
+    });
+
+    const result = await analyzeInput(archivePath);
+
+    expect(result.files).toEqual([
+      expect.objectContaining({
+        fileName: "local-server.jar",
+        source: "local",
+        pathInPack: "minecraft/mods/local-server.jar"
+      })
+    ]);
+    expect(result.overrides).toMatchObject({
+      common: 2,
+      server: 0,
+      client: 0,
+      commonPath: "minecraft"
+    });
+  });
+
   it("does not parse override json files while analyzing a CurseForge pack", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "mcsp-curseforge-overrides-"));
     const archivePath = path.join(dir, "pack.zip");

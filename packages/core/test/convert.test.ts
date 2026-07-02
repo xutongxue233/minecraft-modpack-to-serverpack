@@ -222,6 +222,77 @@ describe("runConversion", () => {
     await expect(fs.readFile(result.readmePath, "utf8")).resolves.toContain("本地 Mod：1");
   });
 
+  it("copies CurseForge custom overrides including datapacks and server configs", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "mcsp-convert-custom-overrides-"));
+    const inputPath = path.join(dir, "pack.zip");
+    const outputDir = path.join(dir, "out");
+    const localMod = await createJarBuffer({
+      "META-INF/mods.toml": [
+        'modLoader="javafml"',
+        'loaderVersion="[47,)"',
+        'license="MIT"',
+        "",
+        "[[mods]]",
+        'modId="customlocal"',
+        'version="1.0.0"',
+        'displayName="Custom Local Mod"',
+        ""
+      ].join("\n")
+    });
+
+    await writeZip(inputPath, {
+      "manifest.json": JSON.stringify({
+        manifestType: "minecraftModpack",
+        name: "Custom Overrides Pack",
+        version: "1.0.0",
+        minecraft: {
+          version: "1.20.1",
+          modLoaders: [{ id: "forge-47.2.0", primary: true }]
+        },
+        overrides: "minecraft",
+        files: []
+      }),
+      "minecraft/mods/custom-local.jar": localMod,
+      "minecraft/config/openloader/data/custom_pack/pack.mcmeta": JSON.stringify({
+        pack: { pack_format: 15, description: "custom data" }
+      }),
+      "minecraft/kubejs/server_scripts/main.js": "ServerEvents.recipes(event => {})",
+      "minecraft/scripts/main.zs": "print('server script');",
+      "minecraft/config/server/example.toml": "enabled = true",
+      "minecraft/options.txt": "gamma:1.0",
+      "overrides/config/ignored.toml": "wrong directory"
+    });
+
+    const result = await runConversion({
+      inputPath,
+      outputDir
+    });
+
+    expect(result.report.overrides).toMatchObject({
+      common: 6,
+      commonPath: "minecraft"
+    });
+    expect(result.report.serverpack).toMatchObject({
+      writtenModFiles: 1,
+      mergedOverrideFiles: 4
+    });
+    await expect(fs.readFile(path.join(result.outputDir, "mods", "custom-local.jar"))).resolves.toEqual(localMod);
+    await expect(
+      fs.readFile(path.join(result.outputDir, "config", "openloader", "data", "custom_pack", "pack.mcmeta"), "utf8")
+    ).resolves.toContain("custom data");
+    await expect(fs.readFile(path.join(result.outputDir, "kubejs", "server_scripts", "main.js"), "utf8")).resolves.toContain(
+      "ServerEvents"
+    );
+    await expect(fs.readFile(path.join(result.outputDir, "scripts", "main.zs"), "utf8")).resolves.toContain(
+      "server script"
+    );
+    await expect(fs.readFile(path.join(result.outputDir, "config", "server", "example.toml"), "utf8")).resolves.toBe(
+      "enabled = true"
+    );
+    await expect(fs.access(path.join(result.outputDir, "options.txt"))).rejects.toThrow();
+    await expect(fs.access(path.join(result.outputDir, "config", "ignored.toml"))).rejects.toThrow();
+  });
+
   it("writes a conversion report when one downloadable file fails", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "mcsp-convert-failed-download-"));
     const inputPath = path.join(dir, "pack.mrpack");

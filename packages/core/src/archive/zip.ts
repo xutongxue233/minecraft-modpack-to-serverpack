@@ -120,7 +120,7 @@ export async function extractZipEntries(
 ): Promise<ExtractedZipFile[]> {
   const mergedLimits = { ...defaultLimits, ...options.limits };
   const prefixes = options.prefixes?.map(normalizePrefix);
-  const stripPrefix = options.stripPrefix ? normalizePrefix(options.stripPrefix) : undefined;
+  const stripPrefix = options.stripPrefix === undefined ? undefined : normalizePrefix(options.stripPrefix);
   const extractedFiles: ExtractedZipFile[] = [];
   let scannedFileCount = 0;
   let totalExpandedSize = 0;
@@ -337,10 +337,15 @@ function assertExtractableEntry(entry: yauzl.Entry, fileName: string): void {
 }
 
 function normalizePrefix(prefix: string): string {
-  const normalized = assertSafeArchiveEntry(prefix);
+  const trimmed = prefix.trim().replaceAll("\\", "/").replace(/^\/+/, "");
+  if (!trimmed || trimmed === "." || trimmed === "./") {
+    return "";
+  }
+
+  const normalized = assertSafeArchiveEntry(trimmed);
   return normalized.endsWith("/") ? normalized : `${normalized}/`;
 }
 
 function isWithinPrefix(fileName: string, prefix: string): boolean {
-  return fileName === prefix || fileName.startsWith(prefix);
+  return prefix === "" || fileName === prefix || fileName.startsWith(prefix);
 }
