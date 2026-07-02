@@ -1,5 +1,6 @@
 appId: com.mcsp.converter
-productName: Minecraft Serverpack Tool
+productName: 整合包转服务端包工具
+afterPack: build/after-pack.mjs
 directories:
   output: release
   buildResources: build
@@ -19,7 +20,7 @@ win:
       arch:
         - x64
 nsis:
-  artifactName: "${productName}-Setup-${version}-${arch}.${ext}"
+  artifactName: "Minecraft-Serverpack-Tool-Setup-${version}-${arch}.${ext}"
 portable:
-  artifactName: "${productName}-Portable-${version}-${arch}.${ext}"
+  artifactName: "Minecraft-Serverpack-Tool-Portable-${version}-${arch}.${ext}"
 asar: true

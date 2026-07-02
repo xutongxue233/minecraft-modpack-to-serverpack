@@ -19,6 +19,8 @@ import { defaultRemoteModRulesUrl } from "@mcsp/core";
 import { WorkerJobManager } from "./worker-job-manager";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const appDisplayName = "整合包转服务端包工具";
+const appUserModelId = "com.mcsp.converter";
 
 let mainWindow: BrowserWindow | null = null;
 let jobManager: WorkerJobManager | null = null;
@@ -34,10 +36,7 @@ const defaultSettings: ConversionSettings = {
   downloadConcurrent: 4,
   downloadTimeoutSeconds: 60,
   downloadRetry: 3,
-  maxExpandedSizeBytes: 4 * 1024 * 1024 * 1024,
-  maxFileCount: 20_000,
   unknownPolicy: "include",
-  outputMode: "package-only",
   downloadServerCore: false,
   testStartScript: true,
   startupTestTimeoutSeconds: 60,
@@ -48,6 +47,11 @@ const defaultSettings: ConversionSettings = {
   theme: "system",
   curseForgeApiKeyConfigured: false
 };
+
+app.setName(appDisplayName);
+if (process.platform === "win32") {
+  app.setAppUserModelId(appUserModelId);
+}
 
 async function createWindow(): Promise<void> {
   const windowIcon = resolveWindowIconPath();
@@ -62,7 +66,7 @@ async function createWindow(): Promise<void> {
     maximizable: false,
     fullscreenable: false,
     backgroundColor: "#151814",
-    title: "整合包转服务端包工具",
+    title: appDisplayName,
     ...(windowIcon === undefined ? {} : { icon: windowIcon }),
     webPreferences: {
       preload: resolvePreloadPath(),
@@ -85,8 +89,8 @@ async function createWindow(): Promise<void> {
 function registerIpc(): void {
   ipcMain.handle("dialog:select-input", async () => {
     const result = await dialog.showOpenDialog({
-      title: "选择整合包",
-      properties: ["openFile"],
+      title: "选择整合包或 packwiz 目录",
+      properties: ["openFile", "openDirectory"],
       filters: [
         { name: "Minecraft 整合包", extensions: ["mrpack", "zip"] },
         { name: "全部文件", extensions: ["*"] }

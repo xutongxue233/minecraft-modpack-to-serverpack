@@ -6,8 +6,8 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import yazl from "yazl";
 import { appError } from "@mcsp/shared";
-import { listZipEntries } from "./archive/zip";
-import { runConversion } from "./convert";
+import { listZipEntries } from "../src/archive/zip";
+import { runConversion } from "../src/convert";
 
 describe("runConversion", () => {
   it("analyzes a Modrinth pack, downloads files and writes a conversion report", async () => {
@@ -53,7 +53,7 @@ describe("runConversion", () => {
       "overrides/config/example.toml": "enabled = false",
       "server-overrides/config/example.toml": "enabled = true",
       "overrides/options.txt": "gamma:1.0",
-      "overrides/mods/local-client.jar": "not reviewed",
+      "client-overrides/mods/local-client.jar": "not reviewed",
       "client-overrides/config/client-only.toml": "client = true"
     });
 
@@ -92,7 +92,7 @@ describe("runConversion", () => {
     });
     expect(result.report.serverpack).toMatchObject({
       writtenModFiles: 1,
-      skippedModFiles: 1,
+      skippedModFiles: 0,
       mergedOverrideFiles: 2,
       coreInstall: {
         enabled: false,
@@ -141,17 +141,85 @@ describe("runConversion", () => {
     expect(startPowerShell).toContain("$LaunchArgs");
     expect(startPowerShell).toContain("Read-ArgumentFile");
     expect(startPowerShell).toContain("win_args.txt");
+    expect(startPowerShell).toContain("forge-*.jar");
     expect(startPowerShell).not.toContain("@user_jvm_args.txt");
     const startBatch = await fs.readFile(path.join(result.outputDir, "start.bat"), "utf8");
     expect(startBatch).toContain("win_args.txt");
+    expect(startBatch).toContain("LEGACY_FORGE_JAR");
     expect(startBatch).toContain('"@%~dp0user_jvm_args.txt"');
     expect(startBatch).not.toContain("start.ps1");
     const startShell = await fs.readFile(path.join(result.outputDir, "start.sh"), "utf8");
     expect(startShell).toContain("JAVA_CMD");
     expect(startShell).toContain("unix_args.txt");
+    expect(startShell).toContain("legacy_forge_jar");
     expect(events).toContain("analyzing");
     expect(events).toContain("downloading");
     expect(events).toContain("completed");
+  });
+
+  it("copies CurseForge mods stored under overrides/mods as local mod files", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "mcsp-convert-local-overrides-"));
+    const inputPath = path.join(dir, "pack.zip");
+    const outputDir = path.join(dir, "out");
+    const localMod = await createJarBuffer({
+      "META-INF/mods.toml": [
+        'modLoader="javafml"',
+        'loaderVersion="[47,)"',
+        'license="MIT"',
+        "",
+        "[[mods]]",
+        'modId="localserver"',
+        'version="1.0.0"',
+        'displayName="Local Server Mod"',
+        ""
+      ].join("\n")
+    });
+
+    await writeZip(inputPath, {
+      "manifest.json": JSON.stringify({
+        manifestType: "minecraftModpack",
+        name: "Local Overrides Pack",
+        version: "1.0.0",
+        minecraft: {
+          version: "1.20.1",
+          modLoaders: [{ id: "forge-47.2.0", primary: true }]
+        },
+        files: []
+      }),
+      "overrides/mods/local-server.jar": localMod,
+      "overrides/config/example.toml": "enabled = true"
+    });
+
+    const result = await runConversion({
+      inputPath,
+      outputDir
+    });
+
+    expect(result.report.summary).toMatchObject({
+      totalFiles: 1,
+      localFiles: 1,
+      missingUrlFiles: 0,
+      includedFiles: 1
+    });
+    expect(result.report.files[0]).toMatchObject({
+      fileName: "local-server.jar",
+      displayName: "Local Server Mod",
+      modId: "localserver",
+      source: "local",
+      downloadStatus: "local",
+      decision: "include",
+      decisionSource: "unknown"
+    });
+    expect(result.report.serverpack).toMatchObject({
+      writtenModFiles: 1,
+      skippedModFiles: 0,
+      mergedOverrideFiles: 1
+    });
+    await expect(fs.readFile(path.join(result.outputDir, "mods", "local-server.jar"))).resolves.toEqual(localMod);
+    await expect(fs.readFile(path.join(result.outputDir, "config", "example.toml"), "utf8")).resolves.toBe(
+      "enabled = true"
+    );
+    await expect(fs.readFile(result.readmePath, "utf8")).resolves.toContain("本地 Mod：1");
   });
 
   it("writes a conversion report when one downloadable file fails", async () => {
@@ -393,6 +461,14 @@ describe("runConversion", () => {
             logMessages.push(event.message);
           }
         },
+        javaRuntimeDiscovery: {
+          includeDefaultSearchRoots: false,
+          env: { PATH: "", Path: "", JAVA_HOME: "" },
+          execFileImpl: async () => ({
+            stdout: "",
+            stderr: 'java version "17.0.10"\nJava HotSpot(TM) 64-Bit Server VM'
+          })
+        },
         startupTestRunner: async ({ onLog }) => {
           onLog?.("info", "fake startup script reached EULA check");
           return {
@@ -437,10 +513,12 @@ describe("runConversion", () => {
     const optimizedStartBatch = await fs.readFile(path.join(result.outputDir, "start-optimized.bat"), "utf8");
     expect(optimizedStartBatch).toContain("-XX:+UseG1GC");
     expect(optimizedStartBatch).toContain("-Daikars.new.flags=true");
+    expect(optimizedStartBatch).toContain("-jar \"%LEGACY_FORGE_JAR%\"");
     expect(optimizedStartBatch).not.toContain("user_jvm_args_optimized");
     const optimizedStartShell = await fs.readFile(path.join(result.outputDir, "start-optimized.sh"), "utf8");
     expect(optimizedStartShell).toContain("-XX:+UseG1GC");
     expect(optimizedStartShell).toContain("-Daikars.new.flags=true");
+    expect(optimizedStartShell).toContain("-jar \"$legacy_forge_jar\"");
     expect(optimizedStartShell).not.toContain("user_jvm_args_optimized");
     expect(result.report.serverpack.startScripts).toEqual(
       expect.arrayContaining(["start.bat", "start.sh", "start-optimized.bat", "start-optimized.sh"])
@@ -537,11 +615,11 @@ describe("runConversion", () => {
   });
 });
 
-function writeZip(filePath: string, entries: Record<string, string>): Promise<void> {
+function writeZip(filePath: string, entries: Record<string, string | Buffer>): Promise<void> {
   return new Promise((resolve, reject) => {
     const zip = new yazl.ZipFile();
     for (const [entryName, content] of Object.entries(entries)) {
-      zip.addBuffer(Buffer.from(content, "utf8"), entryName);
+      zip.addBuffer(Buffer.isBuffer(content) ? content : Buffer.from(content, "utf8"), entryName);
     }
     zip.end();
 

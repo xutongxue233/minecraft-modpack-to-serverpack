@@ -3,6 +3,8 @@ import type { DragEvent } from "react";
 import {
   AlertTriangle,
   Box,
+  ChevronDown,
+  ChevronRight,
   CheckCircle2,
   FileArchive,
   FileText,
@@ -11,8 +13,8 @@ import {
   KeyRound,
   Loader2,
   Minus,
-  PackageOpen,
   Play,
+  Settings,
   ShieldCheck,
   Square,
   Terminal,
@@ -32,6 +34,14 @@ const sourceName: Record<string, string> = {
   curseforge: "CurseForge",
   packwiz: "packwiz",
   instance: "实例目录"
+};
+
+const loaderName: Record<string, string> = {
+  fabric: "Fabric",
+  forge: "Forge",
+  neoforge: "NeoForge",
+  quilt: "Quilt",
+  vanilla: "Vanilla"
 };
 
 interface ProgressSnapshot {
@@ -67,6 +77,8 @@ export function App() {
   const [conversionJobId, setConversionJobId] = useState<string | null>(null);
   const [apiKeyDraft, setApiKeyDraft] = useState("");
   const [apiKeySaving, setApiKeySaving] = useState(false);
+  const [javaSettingsOpen, setJavaSettingsOpen] = useState(false);
+  const [settingsPanelOpen, setSettingsPanelOpen] = useState(false);
   const [settingsMessage, setSettingsMessage] = useState<string | null>(null);
   const [jobPhase, setJobPhase] = useState<ConversionPhase>("idle");
   const [jobMessage, setJobMessage] = useState("等待任务");
@@ -190,7 +202,7 @@ export function App() {
   }, [jobLogs]);
 
   const totalMods = analysis?.files.length ?? 0;
-  const loaderLabel = analysis?.metadata.loader ?? "未识别";
+  const loaderLabel = analysis?.metadata.loader ? loaderName[analysis.metadata.loader] ?? analysis.metadata.loader : "未识别";
   const packTypeLabel = analysis ? sourceName[analysis.metadata.type] ?? analysis.metadata.type : "等待输入";
   const bridgeOnline = Boolean(window.serverpack);
   const analysisWarnings = analysis?.warnings ?? [];
@@ -201,60 +213,9 @@ export function App() {
   const loaderSummary =
     analysis?.metadata.loader === undefined
       ? "未识别加载器"
-      : `${analysis.metadata.loader}${analysis.metadata.loaderVersion ? ` ${analysis.metadata.loaderVersion}` : ""}`;
-  const ruleModeLabel = "远程规则库";
-  const coreModeLabel = settings?.downloadServerCore ? "直接下载核心" : "生成安装脚本";
-  const outputModeLabel = settings?.outputZip ? "目录 + zip" : "仅输出目录";
-  const optimizedScriptLabel = settings?.generateOptimizedStartScript ? "生成优化脚本" : "标准启动脚本";
-  const blueprintSteps = [
-    {
-      label: "输入",
-      value: input ? "已选择整合包" : "等待导入",
-      tone: input ? "ready" : "idle"
-    },
-    {
-      label: "解析",
-      value: analysis ? `${totalMods} 个远程文件` : input ? "可开始解析" : "等待输入",
-      tone: analysis ? "ready" : input ? "active" : "idle"
-    },
-    {
-      label: "规则",
-      value: ruleModeLabel,
-      tone: "ready"
-    },
-    {
-      label: "输出",
-      value: targetOutputDir ? outputModeLabel : "选择目录",
-      tone: targetOutputDir ? "ready" : "idle"
-    }
-  ] as const;
-  const readinessItems = [
-    {
-      label: "桥接状态",
-      value: bridgeOnline ? "本地桥接可用" : "桥接未加载",
-      state: bridgeOnline ? "ready" : "blocked"
-    },
-    {
-      label: "输入包",
-      value: input ? compactPath(input.path, 48) : "尚未选择",
-      state: input ? "ready" : "idle"
-    },
-    {
-      label: "输出目录",
-      value: targetOutputDir ? compactPath(targetOutputDir, 48) : "尚未选择",
-      state: targetOutputDir ? "ready" : "idle"
-    },
-    {
-      label: "运行核心",
-      value: `${coreModeLabel} / ${optimizedScriptLabel}`,
-      state: "ready"
-    },
-    {
-      label: "Java",
-      value: settings?.javaHome ? "已指定 JDK" : "使用系统 PATH",
-      state: settings?.downloadServerCore && !settings?.javaHome ? "active" : "ready"
-    }
-  ] as const;
+      : `${loaderLabel}${analysis.metadata.loaderVersion ? ` ${analysis.metadata.loaderVersion}` : ""}`;
+  const modCountLabel = analysis ? `${totalMods} 个` : "0 个";
+  const overrideCountLabel = analysis ? `${overrideTotal} 个` : "0 个";
 
   const selectedPath = useMemo(() => {
     if (!input) {
@@ -272,7 +233,7 @@ export function App() {
 
   const javaHomePath = useMemo(() => {
     if (!settings?.javaHome) {
-      return "未配置，使用系统 PATH 中的 java";
+      return "转换时自动搜索本机 Java，并按 Minecraft / 加载器版本选择";
     }
     return compactPath(settings.javaHome, 64);
   }, [settings?.javaHome]);
@@ -285,14 +246,6 @@ export function App() {
   const selectInput = useCallback(async () => {
     setError(null);
     const selected = await window.serverpack.selectInput();
-    if (selected) {
-      applyInputSelection(selected);
-    }
-  }, [applyInputSelection]);
-
-  const selectInputDirectory = useCallback(async () => {
-    setError(null);
-    const selected = await window.serverpack.selectInputDirectory();
     if (selected) {
       applyInputSelection(selected);
     }
@@ -462,7 +415,7 @@ export function App() {
     try {
       const next = await window.serverpack.updateSettings({ javaHome: null });
       setSettings(next);
-      setSettingsMessage("Java Home 已清除，将使用系统 PATH");
+      setSettingsMessage("Java Home 已清除，将自动搜索兼容 Java");
     } catch (rawError) {
       setError(formatError(rawError));
     }
@@ -566,13 +519,106 @@ export function App() {
             </div>
           </div>
 
-          <div className="command-meta" aria-label="当前任务状态">
-            <span className="header-chip">{packTypeLabel}</span>
-            <span className="header-chip">{totalMods} Mods</span>
-            <span className={bridgeOnline ? "bridge-chip online" : "bridge-chip offline"}>
-              <span className="signal" />
-              {bridgeOnline ? "bridge online" : "bridge offline"}
-            </span>
+          <div className="command-meta" aria-label="应用设置">
+            <button
+              className="settings-trigger"
+              type="button"
+              aria-expanded={settingsPanelOpen}
+              title="设置"
+              onClick={() => setSettingsPanelOpen((open) => !open)}
+            >
+              <Settings size={16} />
+              设置
+            </button>
+            {settingsPanelOpen && (
+              <div className="settings-popover" role="dialog" aria-label="转换设置">
+                <section className={`java-home-panel ${javaSettingsOpen ? "expanded" : ""}`}>
+                  <button
+                    className="java-home-title"
+                    type="button"
+                    aria-expanded={javaSettingsOpen}
+                    onClick={() => setJavaSettingsOpen((open) => !open)}
+                  >
+                    <Terminal size={16} />
+                    <span>Java 运行环境</span>
+                    <em className={settings?.javaHome ? "configured" : ""}>
+                      {settings?.javaHome ? "手动指定" : "自动选择"}
+                    </em>
+                    {javaSettingsOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                  </button>
+                  {javaSettingsOpen && (
+                    <div className="java-home-body">
+                      <div className="java-mode-row" role="group" aria-label="Java 运行环境模式">
+                        <button
+                          className={!settings?.javaHome ? "active" : ""}
+                          type="button"
+                          onClick={() => void clearJavaHome()}
+                          disabled={!settings || !settings.javaHome}
+                        >
+                          自动选择
+                        </button>
+                        <button
+                          className={settings?.javaHome ? "active" : ""}
+                          type="button"
+                          onClick={selectJavaHome}
+                          disabled={!settings}
+                        >
+                          手动指定
+                        </button>
+                      </div>
+                      <div className="java-home-row">
+                        <output title={settings?.javaHome || undefined}>{javaHomePath}</output>
+                        <button type="button" onClick={selectJavaHome} disabled={!settings}>
+                          <FolderOpen size={15} />
+                          选择 JDK
+                        </button>
+                        {settings?.javaHome && (
+                          <button className="ghost" type="button" onClick={clearJavaHome}>
+                            清除
+                          </button>
+                        )}
+                      </div>
+                      <p className="settings-message">
+                        自动选择会扫描本机 Java，并优先匹配 Forge 1.12 等旧版核心需要的 Java 8。
+                      </p>
+                    </div>
+                  )}
+                </section>
+
+                <section className="api-key-panel">
+                  <div className="api-key-title">
+                    <KeyRound size={16} />
+                    <span>CurseForge API Key</span>
+                    <strong className={settings?.curseForgeApiKeyConfigured ? "configured" : ""}>
+                      {settings?.curseForgeApiKeyConfigured ? "已配置" : "未配置"}
+                    </strong>
+                  </div>
+                  <div className="api-key-row">
+                    <input
+                      type="password"
+                      value={apiKeyDraft}
+                      placeholder={settings?.curseForgeApiKeyConfigured ? "输入新 key 可覆盖" : "粘贴 API Key"}
+                      onChange={(event) => setApiKeyDraft(event.currentTarget.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          void saveCurseForgeApiKey();
+                        }
+                      }}
+                    />
+                    <button type="button" onClick={saveCurseForgeApiKey} disabled={apiKeySaving || !apiKeyDraft.trim()}>
+                      {apiKeySaving ? <Loader2 className="spin" size={15} /> : <KeyRound size={15} />}
+                      保存
+                    </button>
+                    {settings?.curseForgeApiKeyConfigured && (
+                      <button className="ghost" type="button" onClick={clearCurseForgeApiKey} disabled={apiKeySaving}>
+                        清除
+                      </button>
+                    )}
+                  </div>
+                </section>
+                {settingsMessage && <p className="settings-message">{settingsMessage}</p>}
+              </div>
+            )}
           </div>
         </header>
 
@@ -582,7 +628,6 @@ export function App() {
               <Upload size={20} />
               <div>
                 <h2 id="source-title">输入源</h2>
-                <p>读取 `.mrpack`、CurseForge `.zip` 或 packwiz 目录。</p>
               </div>
             </div>
 
@@ -606,7 +651,7 @@ export function App() {
               onDrop={handleDrop}
             >
               <FileArchive size={34} />
-              <span>{dragging ? "释放以导入" : input ? "已锁定整合包" : "选择或拖入整合包"}</span>
+              <span>{dragging ? "释放以导入" : input ? "已锁定整合包" : "选择整合包或 packwiz 目录"}</span>
               <strong>{selectedPath}</strong>
             </button>
 
@@ -617,11 +662,6 @@ export function App() {
               </button>
               <output title={outputDir || undefined}>{outputPath}</output>
             </div>
-
-            <button className="directory-button" type="button" onClick={selectInputDirectory}>
-              <PackageOpen size={17} />
-              选择 packwiz 目录
-            </button>
 
             <div className="switchboard">
               <label>
@@ -660,62 +700,6 @@ export function App() {
               </label>
             </div>
 
-            <div className="java-home-panel">
-              <div className="java-home-title">
-                <Terminal size={16} />
-                <span>Java 运行环境</span>
-                <strong className={settings?.javaHome ? "configured" : ""}>
-                  {settings?.javaHome ? "已配置" : "系统默认"}
-                </strong>
-              </div>
-              <div className="java-home-row">
-                <output title={settings?.javaHome || undefined}>{javaHomePath}</output>
-                <button type="button" onClick={selectJavaHome}>
-                  <FolderOpen size={15} />
-                  选择 JDK
-                </button>
-                {settings?.javaHome && (
-                  <button className="ghost" type="button" onClick={clearJavaHome}>
-                    清除
-                  </button>
-                )}
-              </div>
-              <p className="settings-message">用于直接下载核心时运行 Forge、Fabric、Quilt 安装器。</p>
-            </div>
-
-            <div className="api-key-panel">
-              <div className="api-key-title">
-                <KeyRound size={16} />
-                <span>CurseForge API Key</span>
-                <strong className={settings?.curseForgeApiKeyConfigured ? "configured" : ""}>
-                  {settings?.curseForgeApiKeyConfigured ? "已配置" : "未配置"}
-                </strong>
-              </div>
-              <div className="api-key-row">
-                <input
-                  type="password"
-                  value={apiKeyDraft}
-                  placeholder={settings?.curseForgeApiKeyConfigured ? "输入新 key 可覆盖" : "粘贴 API Key"}
-                  onChange={(event) => setApiKeyDraft(event.currentTarget.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      void saveCurseForgeApiKey();
-                    }
-                  }}
-                />
-                <button type="button" onClick={saveCurseForgeApiKey} disabled={apiKeySaving || !apiKeyDraft.trim()}>
-                  {apiKeySaving ? <Loader2 className="spin" size={15} /> : <KeyRound size={15} />}
-                  保存
-                </button>
-                {settings?.curseForgeApiKeyConfigured && (
-                  <button className="ghost" type="button" onClick={clearCurseForgeApiKey} disabled={apiKeySaving}>
-                    清除
-                  </button>
-                )}
-              </div>
-              {settingsMessage && <p className="settings-message">{settingsMessage}</p>}
-            </div>
-
             <div className="primary-actions">
               <button className="run-button" type="button" onClick={analyze} disabled={!input || busy || !bridgeOnline}>
                 {busy ? <Loader2 className="spin" size={18} /> : <HardDriveDownload size={18} />}
@@ -733,64 +717,24 @@ export function App() {
               </button>
             </div>
 
-            {(converting || jobPhase !== "idle" || conversionOutput) && (
-              <div className="job-console" aria-live="polite">
-                <div className="job-head">
-                  <span className={`job-light ${jobPhase}`} />
-                  <strong>{phaseLabel(jobPhase)}</strong>
-                  <small>{jobMessage}</small>
-                </div>
-                {Object.entries(jobProgressGroups).length > 0 && (
-                  <div className="job-progress-stack" aria-label="任务进度">
-                    {Object.entries(jobProgressGroups).map(([group, progress]) => (
-                      <ProgressBar key={group} group={group as JobProgressGroup} progress={progress} />
-                    ))}
-                  </div>
-                )}
-                {jobLogs.length > 0 && (
-                  <div className="job-log-panel">
-                    <div className="job-log-title">
-                      <Terminal size={14} />
-                      <strong>任务日志</strong>
-                    </div>
-                    <div className="job-log-lines" ref={jobLogRef} role="log" aria-live="polite">
-                      {jobLogs.map((line) => (
-                        <p key={line.id} className={line.level}>
-                          <span>{formatLogLevel(line.level)}</span>
-                          <code>{line.message}</code>
-                        </p>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                <div className="job-actions">
-                  {converting && (
-                    <button type="button" onClick={cancelConversion}>
-                      <Square size={15} />
-                      取消任务
-                    </button>
-                  )}
-                  {conversionOutput && (
-                    <>
-                      <button type="button" onClick={() => void window.serverpack.openPath(conversionOutput.outputDir)}>
-                        <CheckCircle2 size={15} />
-                        打开输出
-                      </button>
-                      <button type="button" onClick={() => void window.serverpack.openPath(conversionOutput.reportPath)}>
-                        <FileText size={15} />
-                        打开报告
-                      </button>
-                      {conversionOutput.zipPath && (
-                        <button type="button" onClick={() => void window.serverpack.openPath(conversionOutput.zipPath!)}>
-                          <FileArchive size={15} />
-                          打开 zip
-                        </button>
-                      )}
-                    </>
-                  )}
+            <div className="overview-section manifest-section">
+              <div className="overview-section-title">
+                <ShieldCheck size={18} />
+                <div>
+                  <h3 id="overview-title">版本信息</h3>
                 </div>
               </div>
-            )}
+              <dl className="readout-grid">
+                <Readout label="整合包来源" value={packTypeLabel} />
+                <Readout label="整合包名称" value={analysis?.metadata.name ?? "未解析"} />
+                <Readout label="整合包版本" value={analysis?.metadata.version ?? "未指定"} />
+                <Readout label="Minecraft 版本" value={minecraftLabel} />
+                <Readout label="Mod 加载器" value={loaderLabel} />
+                <Readout label="加载器版本" value={analysis?.metadata.loaderVersion ?? "未指定"} />
+                <Readout label="Mod 数量" value={modCountLabel} />
+                <Readout label="覆盖文件" value={overrideCountLabel} />
+              </dl>
+            </div>
 
             {error && (
               <div className="error-box" role="alert">
@@ -807,69 +751,69 @@ export function App() {
             )}
           </section>
 
-          <section className="overview-board" aria-labelledby="overview-title">
-            <div className="blueprint-hero">
-              <div className="terrain-strip" aria-hidden="true">
-                {blueprintSteps.map((step) => (
-                  <span key={step.label} className={step.tone} />
-                ))}
+          <section className="overview-board log-board" aria-label="任务日志输出">
+            <div className="job-console monitor-console" aria-live="polite">
+              <div className="job-head">
+                <span className={`job-light ${jobPhase}`} />
+                <strong>{phaseLabel(jobPhase)}</strong>
+                <small>{jobMessage}</small>
               </div>
-              <div className="blueprint-copy">
-                <p className="panel-kicker">Serverpack blueprint</p>
-                <h2 id="overview-title">生成蓝图</h2>
-                <p>
-                  {packName} / {minecraftLabel} / {loaderSummary}
-                </p>
-              </div>
-            </div>
-
-            <div className="blueprint-steps" aria-label="转换准备状态">
-              {blueprintSteps.map((step) => (
-                <BlueprintStep key={step.label} label={step.label} value={step.value} tone={step.tone} />
-              ))}
-            </div>
-
-            <div className="overview-section">
-              <div className="overview-section-title">
-                <ShieldCheck size={18} />
-                <div>
-                  <h3>Manifest 读数</h3>
-                  <p>解析后用于选择核心和输出内容。</p>
+              {Object.entries(jobProgressGroups).length > 0 && (
+                <div className="job-progress-stack" aria-label="任务进度">
+                  {Object.entries(jobProgressGroups).map(([group, progress]) => (
+                    <ProgressBar key={group} group={group as JobProgressGroup} progress={progress} />
+                  ))}
+                </div>
+              )}
+              <div className="job-log-panel">
+                <div className="job-log-title">
+                  <Terminal size={14} />
+                  <strong>任务日志</strong>
+                </div>
+                <div className="job-log-lines" ref={jobLogRef} role="log" aria-live="polite">
+                  {jobLogs.length > 0 ? (
+                    jobLogs.map((line) => (
+                      <p key={line.id} className={line.level}>
+                        <span>{formatLogLevel(line.level)}</span>
+                        <code>{line.message}</code>
+                      </p>
+                    ))
+                  ) : (
+                    <p className="muted">
+                      <span>INFO</span>
+                      <code>等待任务开始。下载进度和启动测试日志会输出到这里。</code>
+                    </p>
+                  )}
                 </div>
               </div>
-              <dl className="readout-grid">
-                <Readout label="来源" value={packTypeLabel} />
-                <Readout label="包名" value={analysis?.metadata.name ?? "未解析"} />
-                <Readout label="版本" value={analysis?.metadata.version ?? "未指定"} />
-                <Readout label="Minecraft" value={minecraftLabel} />
-                <Readout label="加载器" value={loaderLabel} />
-                <Readout label="加载器版本" value={analysis?.metadata.loaderVersion ?? "未指定"} />
-                <Readout label="远程文件" value={`${totalMods}`} />
-                <Readout label="overrides" value={String(overrideTotal)} />
-              </dl>
+              <div className="job-actions">
+                {converting && (
+                  <button type="button" onClick={cancelConversion}>
+                    <Square size={15} />
+                    取消任务
+                  </button>
+                )}
+                {conversionOutput && (
+                  <>
+                    <button type="button" onClick={() => void window.serverpack.openPath(conversionOutput.outputDir)}>
+                      <CheckCircle2 size={15} />
+                      打开输出
+                    </button>
+                    <button type="button" onClick={() => void window.serverpack.openPath(conversionOutput.reportPath)}>
+                      <FileText size={15} />
+                      打开报告
+                    </button>
+                    {conversionOutput.zipPath && (
+                      <button type="button" onClick={() => void window.serverpack.openPath(conversionOutput.zipPath!)}>
+                        <FileArchive size={15} />
+                        打开 zip
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
 
-            <div className="overview-section">
-              <div className="overview-section-title">
-                <Terminal size={18} />
-                <div>
-                  <h3>启动方案</h3>
-                  <p>生成前确认脚本、核心和规则来源。</p>
-                </div>
-              </div>
-              <div className="readiness-list">
-                {readinessItems.map((item) => (
-                  <ReadinessItem key={item.label} label={item.label} value={item.value} state={item.state} />
-                ))}
-              </div>
-            </div>
-
-            {conversionOutput && (
-              <div className="output-receipt">
-                <strong>最近生成</strong>
-                <span>{compactPath(conversionOutput.outputDir, 64)}</span>
-              </div>
-            )}
           </section>
 
         </section>
@@ -883,43 +827,6 @@ function Readout({ label, value, wide = false }: { label: string; value: string;
     <div className={wide ? "readout wide" : "readout"}>
       <dt>{label}</dt>
       <dd>{value}</dd>
-    </div>
-  );
-}
-
-function BlueprintStep({
-  label,
-  value,
-  tone
-}: {
-  label: string;
-  value: string;
-  tone: "ready" | "active" | "idle";
-}) {
-  return (
-    <div className={`blueprint-step ${tone}`}>
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  );
-}
-
-function ReadinessItem({
-  label,
-  value,
-  state
-}: {
-  label: string;
-  value: string;
-  state: "ready" | "active" | "idle" | "blocked";
-}) {
-  return (
-    <div className={`readiness-item ${state}`}>
-      <span aria-hidden="true" />
-      <div>
-        <strong>{label}</strong>
-        <small>{value}</small>
-      </div>
     </div>
   );
 }

@@ -12,6 +12,7 @@ import {
   unknownToAppError
 } from "@mcsp/shared";
 import { analyzeInput } from "./analyze";
+import { extractZipEntries } from "./archive/zip";
 import { type DownloadOptions, type DownloadResult, downloadFileToCache } from "./download/download";
 import { enrichAnalysisWithPlatformMetadata } from "./metadata/platform-metadata";
 import { decideMods } from "./mod-analysis/decisions";
@@ -23,6 +24,7 @@ import {
   ruleContextFromMetadata
 } from "./mod-analysis/user-rules";
 import { prepareServerCore, skippedServerCoreInstallResult, type ServerCoreInstallResult } from "./serverpack/core-installer";
+import { describeJavaRuntime, selectJavaRuntimeForCore, type JavaRuntimeDiscoveryOptions } from "./serverpack/java-runtime";
 import { selectServerCore } from "./serverpack/server-core";
 import { generateServerpack, type ServerpackGenerationResult } from "./serverpack/serverpack";
 import {
@@ -31,6 +33,7 @@ import {
   type StartupTestResult
 } from "./serverpack/startup-test";
 import { createServerpackZip } from "./serverpack/zip-output";
+import { resolveInsideRoot } from "./security/paths";
 
 type ReportDownloadStatus = ConversionReport["files"][number]["downloadStatus"];
 
@@ -39,6 +42,7 @@ export interface RunConversionOptions {
   cacheDir?: string;
   curseForgeApiKey?: string;
   fetchImpl?: typeof fetch;
+  javaRuntimeDiscovery?: Omit<JavaRuntimeDiscoveryOptions, "configuredJavaHome">;
   onEvent?: (event: JobEvent) => void;
   now?: () => Date;
   startupTestRunner?: (options: RunStartupTestOptions) => Promise<StartupTestResult>;
@@ -66,10 +70,45 @@ export async function runConversion(
   const cacheDir =
     request.settings?.cacheDir ?? options.cacheDir ?? path.join(request.outputDir, ".mcsp-cache", "downloads");
   const warnings = [...analysis.warnings];
+  const downloadResultsByFile = new Map<ModFileDescriptor, DownloadResult>();
+  const downloadErrorsByFile = new Map<ModFileDescriptor, string>();
 
   await fs.mkdir(outputDir, { recursive: true });
 
-  const missingUrlFiles = analysis.files.filter((file) => file.downloadUrls.length === 0);
+  const localFiles = analysis.files.filter((file) => file.source === "local");
+  if (localFiles.length > 0) {
+    emit({ type: "phase", jobId, phase: "verifying", message: "正在准备整合包内本地 Mod" });
+    const localResults = await prepareLocalFiles(localFiles, {
+      inputPath: request.inputPath,
+      cacheDir,
+      onProgress: (completedFiles, totalFiles, fileName) => {
+        emit({
+          type: "progress",
+          jobId,
+          group: "mods",
+          current: completedFiles,
+          total: totalFiles,
+          label: fileName ? `正在复制本地 Mod ${fileName}` : `本地 Mod ${completedFiles}/${totalFiles}`,
+          percent: Math.round((completedFiles / totalFiles) * 100)
+        });
+      }
+    });
+    for (const result of localResults.results) {
+      downloadResultsByFile.set(result.file, result);
+    }
+    for (const failure of localResults.failures) {
+      downloadErrorsByFile.set(failure.file, failure.error);
+      warnings.push(`${failure.file.fileName} 本地文件复制失败：${failure.error}`);
+      emit({
+        type: "log",
+        jobId,
+        level: "warn",
+        message: `${failure.file.fileName} 本地文件复制失败，报告将标记为 failed。`
+      });
+    }
+  }
+
+  const missingUrlFiles = analysis.files.filter((file) => file.source !== "local" && file.downloadUrls.length === 0);
   for (const file of missingUrlFiles) {
     warnings.push(`${file.fileName} 没有下载地址，当前报告会标记为 missing-url。`);
   }
@@ -99,13 +138,36 @@ export async function runConversion(
     emit({ type: "log", jobId, level: "info", message: `已加载 ${remoteRules.length} 条远程项目规则。` });
   }
 
-  const downloadableFiles = analysis.files.filter((file) => file.downloadUrls.length > 0);
-  const downloadResultsByFile = new Map<ModFileDescriptor, DownloadResult>();
-  const downloadErrorsByFile = new Map<ModFileDescriptor, string>();
+  const downloadableFiles = analysis.files.filter((file) => file.source !== "local" && file.downloadUrls.length > 0);
   let jarMetadataByFile = new Map<ModFileDescriptor, JarModMetadata>();
   const serverCore = selectServerCore(analysis.metadata, { hasMods: analysis.files.length > 0 });
   const shouldDownloadServerCore = request.settings?.downloadServerCore ?? false;
   const shouldTestStartScript = request.settings?.testStartScript ?? shouldDownloadServerCore;
+  let effectiveJavaHome = request.settings?.javaHome;
+  if (shouldDownloadServerCore || shouldTestStartScript) {
+    emit({ type: "log", jobId, level: "info", message: "正在搜索并选择兼容的 Java 运行环境。" });
+    const javaSelection = await selectJavaRuntimeForCore(serverCore, {
+      ...options.javaRuntimeDiscovery,
+      ...(request.settings?.javaHome === undefined ? {} : { configuredJavaHome: request.settings.javaHome })
+    });
+    for (const warning of javaSelection.warnings) {
+      warnings.push(warning);
+      emit({ type: "log", jobId, level: "warn", message: warning });
+    }
+    if (javaSelection.selected) {
+      effectiveJavaHome = javaSelection.selected.javaHome ?? effectiveJavaHome;
+      const message = `已选择 Java：${describeJavaRuntime(javaSelection.selected)}；要求：${javaSelection.requirement.label}。`;
+      serverCore.notes.push(message);
+      emit({ type: "log", jobId, level: "info", message });
+    } else {
+      emit({
+        type: "log",
+        jobId,
+        level: "warn",
+        message: `未找到兼容 Java；要求：${javaSelection.requirement.label}，已发现 ${javaSelection.candidates.length} 个 Java。`
+      });
+    }
+  }
   const coreInstallPromise = shouldDownloadServerCore
     ? prepareServerCore({
         outputDir,
@@ -115,7 +177,7 @@ export async function runConversion(
         ...(request.settings?.downloadTimeoutSeconds === undefined
           ? {}
           : { timeoutSeconds: request.settings.downloadTimeoutSeconds }),
-        ...(request.settings?.javaHome === undefined ? {} : { javaHome: request.settings.javaHome }),
+        ...(effectiveJavaHome === undefined ? {} : { javaHome: effectiveJavaHome }),
         onProgress: (event) => {
           emit({
             type: "progress",
@@ -213,8 +275,16 @@ export async function runConversion(
       });
     }
 
+  }
+
+  if (downloadResultsByFile.size > 0) {
     emit({ type: "phase", jobId, phase: "verifying", message: "正在读取 Mod 元数据" });
-    jarMetadataByFile = await scanDownloadedJarMetadata(downloadResults.results);
+    jarMetadataByFile = await scanDownloadedJarMetadata([...downloadResultsByFile.values()], {
+      onWarning: (message) => {
+        warnings.push(message);
+        emit({ type: "log", jobId, level: "warn", message });
+      }
+    });
   }
 
   coreInstall = await coreInstallPromise;
@@ -239,7 +309,7 @@ export async function runConversion(
     downloadResultsByFile,
     core: serverCore,
     coreInstall,
-    ...(request.settings?.javaHome === undefined ? {} : { javaHome: request.settings.javaHome }),
+    ...(effectiveJavaHome === undefined ? {} : { javaHome: effectiveJavaHome }),
     ...(request.settings?.generateOptimizedStartScript === undefined
       ? {}
       : { generateOptimizedStartScript: request.settings.generateOptimizedStartScript })
@@ -262,7 +332,7 @@ export async function runConversion(
         ...(request.settings?.startupTestTimeoutSeconds === undefined
           ? {}
           : { timeoutSeconds: request.settings.startupTestTimeoutSeconds }),
-        ...(request.settings?.javaHome === undefined ? {} : { javaHome: request.settings.javaHome }),
+        ...(effectiveJavaHome === undefined ? {} : { javaHome: effectiveJavaHome }),
         onLog: (level, message) => emit({ type: "log", jobId, level, message })
       });
     } catch (error) {
@@ -384,6 +454,136 @@ async function downloadFilesBestEffort(
   return { results, failures };
 }
 
+async function prepareLocalFiles(
+  files: ModFileDescriptor[],
+  options: {
+    inputPath: string;
+    cacheDir: string;
+    onProgress?: (completedFiles: number, totalFiles: number, fileName?: string) => void;
+  }
+): Promise<{ results: DownloadResult[]; failures: Array<{ file: ModFileDescriptor; error: string }> }> {
+  const localCacheRoot = path.join(options.cacheDir, "local", sanitizePathSegment(path.basename(options.inputPath)));
+  await fs.rm(localCacheRoot, { recursive: true, force: true });
+  await fs.mkdir(localCacheRoot, { recursive: true });
+
+  const stat = await fs.stat(options.inputPath);
+  if (stat.isDirectory()) {
+    return prepareLocalFilesFromDirectory(files, {
+      inputPath: options.inputPath,
+      localCacheRoot,
+      ...(options.onProgress === undefined ? {} : { onProgress: options.onProgress })
+    });
+  }
+
+  return prepareLocalFilesFromZip(files, {
+    inputPath: options.inputPath,
+    localCacheRoot,
+    ...(options.onProgress === undefined ? {} : { onProgress: options.onProgress })
+  });
+}
+
+async function prepareLocalFilesFromZip(
+  files: ModFileDescriptor[],
+  options: {
+    inputPath: string;
+    localCacheRoot: string;
+    onProgress?: (completedFiles: number, totalFiles: number, fileName?: string) => void;
+  }
+): Promise<{ results: DownloadResult[]; failures: Array<{ file: ModFileDescriptor; error: string }> }> {
+  const filesByEntryName = new Map(files.flatMap((file) => (file.pathInPack ? [[file.pathInPack, file] as const] : [])));
+  const extractedByEntryName = new Map<string, { outputPath: string; sizeBytes: number }>();
+  let completedFiles = 0;
+
+  options.onProgress?.(0, files.length);
+  await extractZipEntries(options.inputPath, options.localCacheRoot, {
+    shouldExtract: (_relativePath, entryName) => filesByEntryName.has(entryName),
+    onFile: (file) => {
+      const descriptor = filesByEntryName.get(file.entryName);
+      if (!descriptor) {
+        return;
+      }
+      completedFiles += 1;
+      extractedByEntryName.set(file.entryName, {
+        outputPath: file.outputPath,
+        sizeBytes: file.sizeBytes
+      });
+      options.onProgress?.(completedFiles, files.length, descriptor.fileName);
+    }
+  });
+
+  return buildLocalFileResults(files, (file) => {
+    const extracted = file.pathInPack ? extractedByEntryName.get(file.pathInPack) : undefined;
+    if (!extracted) {
+      throw new Error(file.pathInPack ? `压缩包内未找到 ${file.pathInPack}` : "缺少压缩包内路径");
+    }
+    return extracted;
+  });
+}
+
+async function prepareLocalFilesFromDirectory(
+  files: ModFileDescriptor[],
+  options: {
+    inputPath: string;
+    localCacheRoot: string;
+    onProgress?: (completedFiles: number, totalFiles: number, fileName?: string) => void;
+  }
+): Promise<{ results: DownloadResult[]; failures: Array<{ file: ModFileDescriptor; error: string }> }> {
+  const copiedByPathInPack = new Map<string, { outputPath: string; sizeBytes: number }>();
+  let completedFiles = 0;
+
+  options.onProgress?.(0, files.length);
+  for (const file of files) {
+    if (!file.pathInPack) {
+      continue;
+    }
+
+    const sourcePath = resolveInsideRoot(options.inputPath, file.pathInPack);
+    const outputPath = resolveInsideRoot(options.localCacheRoot, file.pathInPack);
+    await fs.mkdir(path.dirname(outputPath), { recursive: true });
+    await fs.copyFile(sourcePath, outputPath);
+    const stat = await fs.stat(outputPath);
+    copiedByPathInPack.set(file.pathInPack, { outputPath, sizeBytes: stat.size });
+    completedFiles += 1;
+    options.onProgress?.(completedFiles, files.length, file.fileName);
+  }
+
+  return buildLocalFileResults(files, (file) => {
+    const copied = file.pathInPack ? copiedByPathInPack.get(file.pathInPack) : undefined;
+    if (!copied) {
+      throw new Error(file.pathInPack ? `目录内未找到 ${file.pathInPack}` : "缺少本地文件路径");
+    }
+    return copied;
+  });
+}
+
+function buildLocalFileResults(
+  files: ModFileDescriptor[],
+  resolveLocalFile: (file: ModFileDescriptor) => { outputPath: string; sizeBytes: number }
+): { results: DownloadResult[]; failures: Array<{ file: ModFileDescriptor; error: string }> } {
+  const results: DownloadResult[] = [];
+  const failures: Array<{ file: ModFileDescriptor; error: string }> = [];
+
+  for (const file of files) {
+    try {
+      const localFile = resolveLocalFile(file);
+      results.push({
+        file,
+        cachePath: localFile.outputPath,
+        sizeBytes: localFile.sizeBytes,
+        fromCache: false,
+        ...(file.pathInPack === undefined ? {} : { url: `local://${file.pathInPack}` })
+      });
+    } catch (error) {
+      failures.push({
+        file,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
+  return { results, failures };
+}
+
 function buildConversionReport({
   request,
   analysis,
@@ -422,7 +622,13 @@ function buildConversionReport({
     const downloadError = downloadErrorsByFile.get(file);
     const jarMetadata = jarMetadataByFile.get(file);
     const downloadStatus: ReportDownloadStatus =
-      file.downloadUrls.length === 0
+      file.source === "local"
+        ? downloadError
+          ? "failed"
+          : downloadResult
+            ? "local"
+            : "missing-url"
+        : file.downloadUrls.length === 0
         ? "missing-url"
         : downloadError
           ? "failed"
@@ -453,6 +659,7 @@ function buildConversionReport({
 
   const downloadedFiles = files.filter((file) => file.downloadStatus === "downloaded").length;
   const cachedFiles = files.filter((file) => file.downloadStatus === "cached").length;
+  const localFiles = files.filter((file) => file.downloadStatus === "local").length;
   const missingUrlFiles = files.filter((file) => file.downloadStatus === "missing-url").length;
   const failedDownloadFiles = files.filter((file) => file.downloadStatus === "failed").length;
   const includedFiles = files.filter((file) => file.decision === "include").length;
@@ -478,6 +685,7 @@ function buildConversionReport({
       totalFiles: files.length,
       downloadedFiles,
       cachedFiles,
+      localFiles,
       missingUrlFiles,
       failedDownloadFiles,
       includedFiles,
@@ -537,6 +745,7 @@ function renderReadme(report: ConversionReport): string {
     `- 文件总数：${report.summary.totalFiles}`,
     `- 已下载：${report.summary.downloadedFiles}`,
     `- 缓存命中：${report.summary.cachedFiles}`,
+    `- 本地 Mod：${report.summary.localFiles}`,
     `- 缺少下载地址：${report.summary.missingUrlFiles}`,
     `- 下载失败：${report.summary.failedDownloadFiles}`,
     `- 已写入 mods：${report.serverpack.writtenModFiles}`,

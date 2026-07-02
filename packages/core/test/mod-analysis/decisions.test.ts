@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ModFileDescriptor } from "@mcsp/shared";
-import { decideMods } from "./decisions";
+import { decideMods } from "../../src/mod-analysis/decisions";
 
 describe("decideMods", () => {
   it("uses manifest server env when available", () => {
@@ -153,6 +153,90 @@ describe("decideMods", () => {
         decision: "exclude",
         reason: "远程项目规则 modmenu：排除",
         source: "remote-rule"
+      }
+    ]);
+  });
+
+  it("excludes included mods when mandatory server dependencies are excluded", () => {
+    const jade = modFile("Jade.jar");
+    const addon = modFile("JadeAddon.jar");
+    const metadataByFile = new Map([
+      [
+        jade,
+        {
+          modId: "jade",
+          source: "mods.toml" as const
+        }
+      ],
+      [
+        addon,
+        {
+          modId: "jadeaddon",
+          source: "mods.toml" as const,
+          dependencies: [
+            {
+              modId: "jade",
+              mandatory: true,
+              side: "BOTH" as const
+            }
+          ]
+        }
+      ]
+    ]);
+
+    expect(
+      decideMods([jade, addon], {
+        metadataByFile,
+        overrides: [
+          {
+            modId: "jade",
+            decision: "exclude",
+            decisionSource: "remote-rule",
+            reason: "客户端 HUD Mod"
+          }
+        ]
+      })
+    ).toEqual([
+      {
+        fileName: "Jade.jar",
+        decision: "exclude",
+        reason: "客户端 HUD Mod",
+        source: "remote-rule"
+      },
+      {
+        fileName: "JadeAddon.jar",
+        decision: "exclude",
+        reason: "必需依赖 jade 已被排除：客户端 HUD Mod",
+        source: "jar-metadata"
+      }
+    ]);
+  });
+
+  it("keeps mods when declared dependencies are absent from the pack", () => {
+    const addon = modFile("YoukaisHomecoming.jar");
+    const metadataByFile = new Map([
+      [
+        addon,
+        {
+          modId: "youkaishomecoming",
+          source: "mods.toml" as const,
+          dependencies: [
+            {
+              modId: "l2harvester",
+              mandatory: true,
+              side: "BOTH" as const
+            }
+          ]
+        }
+      ]
+    ]);
+
+    expect(decideMods([addon], { metadataByFile })).toEqual([
+      {
+        fileName: "YoukaisHomecoming.jar",
+        decision: "include",
+        reason: "缺少明确服务端环境声明",
+        source: "unknown"
       }
     ]);
   });

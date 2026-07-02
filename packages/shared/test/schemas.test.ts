@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ConversionRequestSchema, UpdateSettingsRequestSchema } from "./schemas";
+import { ConversionRequestSchema, UpdateSettingsRequestSchema } from "../src/schemas";
 
 describe("conversion schemas", () => {
   it("accepts optimized start script settings", () => {

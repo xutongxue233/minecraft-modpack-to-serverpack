@@ -1,0 +1,26 @@
+# <type>(<scope>): <short summary>
+#
+# Body: explain why the change is needed and what changed.
+# Footer: reference issues or breaking changes when applicable.
+#
+# Types:
+#   feat      New user-facing capability
+#   fix       Bug fix
+#   docs      Documentation only
+#   style     Formatting only, no behavior change
+#   refactor  Code restructuring without behavior change
+#   perf      Performance improvement
+#   test      Test-only change
+#   build     Build system, packaging, dependencies
+#   ci        CI/CD configuration
+#   chore     Maintenance
+#   rules     Client/server Mod rule updates
+#   release   Versioning and release metadata
+#
+# Examples:
+#   feat(serverpack): generate optimized batch startup scripts
+#   fix(rules): exclude lightspeed from Forge serverpacks
+#   docs(readme): add CurseForge API key setup notes
+#
+# Keep the first line under 72 characters.
+# Use imperative mood: "add", "fix", "remove", not "added" or "fixes".

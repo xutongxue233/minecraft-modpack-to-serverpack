@@ -1,0 +1,74 @@
+name: Client-only Mod rule request
+description: Request a rule update for client-only, server-only, or incompatible Mods.
+title: "[Rule]: "
+labels: ["rules", "client-mod-filter", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this when a Mod should be excluded from or included in generated serverpacks.
+        Prefer stable project identifiers or mod IDs over version-specific file names.
+  - type: input
+    id: mod-name
+    attributes:
+      label: Mod name
+      placeholder: Lightspeed
+    validations:
+      required: true
+  - type: input
+    id: mod-id
+    attributes:
+      label: Mod ID
+      placeholder: lightspeed
+    validations:
+      required: true
+  - type: input
+    id: project-url
+    attributes:
+      label: Project URL
+      placeholder: CurseForge or Modrinth project URL
+  - type: dropdown
+    id: requested-decision
+    attributes:
+      label: Requested decision
+      options:
+        - Exclude from serverpack
+        - Include in serverpack
+        - Needs investigation
+    validations:
+      required: true
+  - type: dropdown
+    id: loader
+    attributes:
+      label: Loader
+      options:
+        - Forge
+        - NeoForge
+        - Fabric
+        - Quilt
+        - Multiple
+        - Unknown
+    validations:
+      required: true
+  - type: input
+    id: minecraft-version
+    attributes:
+      label: Minecraft version range
+      placeholder: 1.20.1 or >=1.18
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Explain why this Mod is client-only, server-only, or incompatible. Link docs or paste log excerpts.
+      placeholder: It references net.minecraft.client... on dedicated server.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I provided a stable mod ID, slug, or project URL instead of only a file name.
+          required: true
+        - label: I removed secrets and private data from logs.
+          required: true

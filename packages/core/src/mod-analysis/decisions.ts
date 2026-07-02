@@ -10,7 +10,7 @@ export interface DecideModsOptions {
 export function decideMods(files: ModFileDescriptor[], options: DecideModsOptions = {}): ModDecision[] {
   const unknownPolicy = options.unknownPolicy ?? "include";
   const overrideIndex = buildOverrideIndex(options.overrides ?? []);
-  return files.map((file) => {
+  const decisions = files.map((file) => {
     const jarMetadata = options.metadataByFile?.get(file);
     const override = findOverride(file, jarMetadata, overrideIndex);
     if (override) {
@@ -23,6 +23,8 @@ export function decideMods(files: ModFileDescriptor[], options: DecideModsOption
     }
     return decideMod(file, unknownPolicy, jarMetadata);
   });
+
+  return applyDependencyExclusions(files, decisions, options.metadataByFile);
 }
 
 export function decideMod(
@@ -129,6 +131,93 @@ function decisionOverrideKeys(override: ModDecisionOverride): string[] {
       : []),
     ...(override.fileName ? [`file:${override.fileName}`] : [])
   ];
+}
+
+function applyDependencyExclusions(
+  files: ModFileDescriptor[],
+  decisions: ModDecision[],
+  metadataByFile: Map<ModFileDescriptor, JarModMetadata> | undefined
+): ModDecision[] {
+  if (!metadataByFile) {
+    return decisions;
+  }
+
+  const nextDecisions = decisions.map((decision) => ({ ...decision }));
+  const runtimeDependencyIds = new Set([
+    "java",
+    "minecraft",
+    "forge",
+    "neoforge",
+    "fabric",
+    "fabricloader",
+    "quilt_loader",
+    "quilted_fabric_loader"
+  ]);
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+    const includedModIds = new Set<string>();
+    const knownModIds = new Set<string>();
+    const excludedByModId = new Map<string, ModDecision>();
+
+    for (const [index, file] of files.entries()) {
+      const modId = normalizeDependencyModId(metadataByFile.get(file)?.modId);
+      if (!modId) {
+        continue;
+      }
+      knownModIds.add(modId);
+      const decision = nextDecisions[index];
+      if (decision?.decision === "include") {
+        includedModIds.add(modId);
+      } else if (decision) {
+        excludedByModId.set(modId, decision);
+      }
+    }
+
+    for (const [index, file] of files.entries()) {
+      const decision = nextDecisions[index];
+      if (decision?.decision !== "include") {
+        continue;
+      }
+
+      const jarMetadata = metadataByFile.get(file);
+      const missingDependency = jarMetadata?.dependencies?.find((dependency) => {
+        const dependencyModId = normalizeDependencyModId(dependency.modId);
+        return (
+          dependency.mandatory &&
+          dependencyModId !== undefined &&
+          !runtimeDependencyIds.has(dependencyModId) &&
+          dependency.side !== "CLIENT" &&
+          knownModIds.has(dependencyModId) &&
+          !includedModIds.has(dependencyModId)
+        );
+      });
+
+      if (!missingDependency) {
+        continue;
+      }
+
+      const dependencyModId = normalizeDependencyModId(missingDependency.modId) ?? missingDependency.modId;
+      const excludedDependency = excludedByModId.get(dependencyModId);
+      nextDecisions[index] = {
+        fileName: file.fileName,
+        decision: "exclude",
+        reason: excludedDependency
+          ? `必需依赖 ${missingDependency.modId} 已被排除：${excludedDependency.reason}`
+          : `必需依赖 ${missingDependency.modId} 未进入服务端`,
+        source: "jar-metadata"
+      };
+      changed = true;
+    }
+  }
+
+  return nextDecisions;
+}
+
+function normalizeDependencyModId(value: string | undefined): string | undefined {
+  const normalized = value?.trim().toLowerCase();
+  return normalized ? normalized : undefined;
 }
 
 function normalizeRuleValue(value: string): string {

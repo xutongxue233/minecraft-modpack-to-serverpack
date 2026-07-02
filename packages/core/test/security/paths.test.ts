@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertSafeArchiveEntry } from "./paths";
+import { assertSafeArchiveEntry } from "../../src/security/paths";
 
 describe("assertSafeArchiveEntry", () => {
   it("accepts normal relative paths", () => {

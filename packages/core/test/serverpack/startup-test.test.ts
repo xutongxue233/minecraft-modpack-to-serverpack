@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { runServerpackStartupTest } from "./startup-test";
+import { runServerpackStartupTest } from "../../src/serverpack/startup-test";
 
 describe("runServerpackStartupTest", () => {
   it("treats an EULA gate as a passed startup script test", async () => {
@@ -42,6 +42,20 @@ describe("runServerpackStartupTest", () => {
       status: "passed"
     });
     expect(logs.join("\n")).toContain(process.platform === "win32" ? "start-optimized.bat" : "start-optimized.sh");
+  });
+
+  it("does not treat a clean process exit as success without the EULA gate", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "mcsp-startup-test-clean-exit-"));
+    await writeCleanExitStartScript(dir);
+
+    await expect(
+      runServerpackStartupTest({
+        outputDir: dir,
+        timeoutSeconds: 5
+      })
+    ).rejects.toMatchObject({
+      code: "E_STARTUP_TEST_FAILED"
+    });
   });
 });
 
@@ -107,6 +121,30 @@ async function writeFakeOptimizedStartScript(dir: string): Promise<void> {
       "#!/usr/bin/env bash",
       "echo 'You need to agree to the EULA in order to run the server.'",
       "exit 1",
+      ""
+    ].join("\n"),
+    "utf8"
+  );
+  await fs.chmod(scriptPath, 0o755);
+}
+
+async function writeCleanExitStartScript(dir: string): Promise<void> {
+  if (process.platform === "win32") {
+    await fs.writeFile(
+      path.join(dir, "start.bat"),
+      ["@echo off", "echo A problem occurred running the Server launcher.", "exit /b 0", ""].join("\r\n"),
+      "utf8"
+    );
+    return;
+  }
+
+  const scriptPath = path.join(dir, "start.sh");
+  await fs.writeFile(
+    scriptPath,
+    [
+      "#!/usr/bin/env bash",
+      "echo 'A problem occurred running the Server launcher.'",
+      "exit 0",
       ""
     ].join("\n"),
     "utf8"

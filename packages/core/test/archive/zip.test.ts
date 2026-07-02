@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import yazl from "yazl";
-import { extractZipEntries } from "./zip";
+import { extractZipEntries } from "../../src/archive/zip";
 
 describe("extractZipEntries", () => {
   it("extracts only matching prefixes and strips the selected prefix", async () => {

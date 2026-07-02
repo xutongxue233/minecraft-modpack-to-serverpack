@@ -121,7 +121,7 @@ export interface ConversionReport {
     version?: string;
     source: ModFileDescriptor["source"];
     metadataSource?: string;
-    downloadStatus: "cached" | "downloaded" | "missing-url" | "failed" | "skipped";
+    downloadStatus: "cached" | "downloaded" | "local" | "missing-url" | "failed" | "skipped";
     downloadError?: string;
     sizeBytes?: number;
     hashes: Record<string, string>;
@@ -133,6 +133,7 @@ export interface ConversionReport {
     totalFiles: number;
     downloadedFiles: number;
     cachedFiles: number;
+    localFiles: number;
     missingUrlFiles: number;
     failedDownloadFiles: number;
     includedFiles: number;
@@ -184,10 +185,7 @@ export interface ConversionSettings {
   downloadConcurrent: number;
   downloadTimeoutSeconds: number;
   downloadRetry: number;
-  maxExpandedSizeBytes: number;
-  maxFileCount: number;
   unknownPolicy: "include" | "exclude";
-  outputMode: "package-only" | "installable-server";
   downloadServerCore: boolean;
   testStartScript: boolean;
   startupTestTimeoutSeconds: number;

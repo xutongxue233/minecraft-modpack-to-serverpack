@@ -140,8 +140,13 @@ async function enrichCurseForgeFiles(
       }
 
       const apiFileName = fileInfo.fileName ?? fileInfo.displayName ?? entry.file.fileName;
+      const outputFileName = path.basename(apiFileName);
       const downloadUrls = mergeUnique([
-        ...curseForgeDownloadCandidates(fileInfo.downloadUrl),
+        ...curseForgeDownloadCandidates({
+          downloadUrl: fileInfo.downloadUrl,
+          fileId: fileInfo.id,
+          fileName: outputFileName
+        }),
         ...entry.file.downloadUrls
       ]);
 
@@ -154,8 +159,8 @@ async function enrichCurseForgeFiles(
           fileId: entry.ids.fileId,
           name: projectInfo?.name ?? fileInfo.displayName ?? entry.file.name,
           slug: projectInfo?.slug ?? entry.file.slug,
-          fileName: path.basename(apiFileName),
-          downloadUrls,
+          fileName: outputFileName,
+          downloadUrls: withModMirrorCandidates(downloadUrls),
           expectedHashes: { ...fileInfo.hashes, ...entry.file.expectedHashes },
           metadataSource: "curseforge-api",
           pageUrl: projectInfo?.links?.websiteUrl ?? entry.file.pageUrl
@@ -214,7 +219,9 @@ async function enrichModrinthFiles(
           slug: project?.slug ?? entry.file.slug,
           name: project?.title ?? version.name ?? entry.file.name,
           fileName: path.basename(version.fileName ?? entry.file.fileName),
-          downloadUrls: mergeUnique([...(version.fileUrl ? [version.fileUrl] : []), ...entry.file.downloadUrls]),
+          downloadUrls: withModMirrorCandidates(
+            mergeUnique([...(version.fileUrl ? [version.fileUrl] : []), ...entry.file.downloadUrls])
+          ),
           expectedHashes: { ...version.hashes, ...entry.file.expectedHashes },
           metadataSource: "modrinth-api",
           pageUrl: project?.slug ? `https://modrinth.com/mod/${project.slug}` : entry.file.pageUrl,
@@ -414,21 +421,64 @@ function curseForgeHashAlgorithm(value: unknown): "sha1" | "md5" | undefined {
   return undefined;
 }
 
-function curseForgeDownloadCandidates(url: string | undefined): string[] {
-  if (!url) {
+function curseForgeDownloadCandidates(input: {
+  downloadUrl?: string | undefined;
+  fileId?: string | undefined;
+  fileName?: string | undefined;
+}): string[] {
+  const candidates: string[] = [];
+  if (input.downloadUrl) {
+    candidates.push(
+      input.downloadUrl
+        .replace("-service.overwolf.wtf", ".forgecdn.net")
+        .replace("://edge.", "://mediafilez.")
+        .replace("://media.", "://mediafilez."),
+      input.downloadUrl.replace("://edge.", "://mediafilez.").replace("://media.", "://mediafilez."),
+      input.downloadUrl.replace("-service.overwolf.wtf", ".forgecdn.net"),
+      input.downloadUrl.replace("://media.", "://edge."),
+      input.downloadUrl
+    );
+  }
+
+  candidates.push(...curseForgeCdnFallbackCandidates(input.fileId, input.fileName));
+  return mergeUnique(candidates);
+}
+
+function withModMirrorCandidates(urls: string[]): string[] {
+  const officialUrls = mergeUnique(urls);
+  const mirrorUrls = officialUrls
+    .map(modMirrorCandidate)
+    .filter((url): url is string => typeof url === "string");
+  return mergeUnique([...mirrorUrls, ...officialUrls]);
+}
+
+function modMirrorCandidate(url: string): string | undefined {
+  const mapped = url
+    .replace("api.modrinth.com", "mod.mcimirror.top/modrinth")
+    .replace("staging-api.modrinth.com", "mod.mcimirror.top/modrinth")
+    .replace("cdn.modrinth.com", "mod.mcimirror.top")
+    .replace("api.curseforge.com", "mod.mcimirror.top/curseforge")
+    .replace("edge.forgecdn.net", "mod.mcimirror.top")
+    .replace("mediafilez.forgecdn.net", "mod.mcimirror.top")
+    .replace("media.forgecdn.net", "mod.mcimirror.top");
+  return mapped === url ? undefined : mapped;
+}
+
+function curseForgeCdnFallbackCandidates(fileId: string | undefined, fileName: string | undefined): string[] {
+  const numericFileId = Number(fileId);
+  if (!fileName || !Number.isSafeInteger(numericFileId) || numericFileId <= 0) {
     return [];
   }
 
-  return mergeUnique([
-    url
-      .replace("-service.overwolf.wtf", ".forgecdn.net")
-      .replace("://edge.", "://mediafilez.")
-      .replace("://media.", "://mediafilez."),
-    url.replace("://edge.", "://mediafilez.").replace("://media.", "://mediafilez."),
-    url.replace("-service.overwolf.wtf", ".forgecdn.net"),
-    url.replace("://media.", "://edge."),
-    url
-  ]);
+  const directory = Math.floor(numericFileId / 1000);
+  const tail = String(numericFileId % 1000).padStart(3, "0");
+  const encodedFileName = encodeURIComponent(path.basename(fileName));
+  const filePath = `files/${directory}/${tail}/${encodedFileName}`;
+  return [
+    `https://mediafilez.forgecdn.net/${filePath}`,
+    `https://edge.forgecdn.net/${filePath}`,
+    `https://media.forgecdn.net/${filePath}`
+  ];
 }
 
 function getCurseForgeIds(file: ModFileDescriptor): CurseForgeIds | null {

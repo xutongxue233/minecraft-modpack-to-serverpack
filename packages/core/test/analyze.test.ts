@@ -4,7 +4,7 @@ import path from "node:path";
 import { createWriteStream } from "node:fs";
 import { describe, expect, it } from "vitest";
 import yazl from "yazl";
-import { analyzeInput } from "./analyze";
+import { analyzeInput } from "../src/analyze";
 
 describe("analyzeInput", () => {
   it("parses Modrinth mrpack metadata and files", async () => {
@@ -78,6 +78,84 @@ describe("analyzeInput", () => {
     });
     expect(result.files[0]?.id).toBe("1234:5678");
     expect(result.overrides.common).toBe(1);
+  });
+
+  it("treats CurseForge override jars as local mod files", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "mcsp-curseforge-local-mods-"));
+    const archivePath = path.join(dir, "pack.zip");
+
+    await writeZip(archivePath, {
+      "manifest.json": JSON.stringify({
+        manifestType: "minecraftModpack",
+        name: "Local Overrides Pack",
+        minecraft: {
+          version: "1.20.1",
+          modLoaders: [{ id: "forge-47.2.0", primary: true }]
+        },
+        files: []
+      }),
+      "overrides/mods/local-server.jar": "fake jar",
+      "overrides/config/example.toml": "enabled = true"
+    });
+
+    const result = await analyzeInput(archivePath);
+
+    expect(result.files).toEqual([
+      expect.objectContaining({
+        fileName: "local-server.jar",
+        source: "local",
+        pathInPack: "overrides/mods/local-server.jar",
+        downloadUrls: []
+      })
+    ]);
+    expect(result.overrides.common).toBe(2);
+  });
+
+  it("does not parse override json files while analyzing a CurseForge pack", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "mcsp-curseforge-overrides-"));
+    const archivePath = path.join(dir, "pack.zip");
+
+    await writeZip(archivePath, {
+      "manifest.json": JSON.stringify({
+        manifestType: "minecraftModpack",
+        name: "Legacy Config Pack",
+        minecraft: {
+          version: "1.12.2",
+          modLoaders: [{ id: "forge-14.23.5.2860", primary: true }]
+        },
+        files: []
+      }),
+      "overrides/config/qualitytools/Quailities/boots.json": '{ "name": "bad\nlegacy config" }',
+      "overrides/config/roguelike_dungeons/settings/base/dungeon_base.json": "// legacy json-like config"
+    });
+
+    const result = await analyzeInput(archivePath);
+
+    expect(result.metadata).toMatchObject({
+      type: "curseforge",
+      name: "Legacy Config Pack",
+      minecraftVersion: "1.12.2",
+      loader: "forge",
+      loaderVersion: "14.23.5.2860"
+    });
+    expect(result.overrides.common).toBe(2);
+  });
+
+  it("wraps malformed root manifests in an input format error", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "mcsp-bad-manifest-"));
+    const archivePath = path.join(dir, "pack.zip");
+
+    await writeZip(archivePath, {
+      "manifest.json": '{ "name": "broken\nmanifest" }'
+    });
+
+    await expect(analyzeInput(archivePath)).rejects.toMatchObject({
+      code: "E_INPUT_FORMAT",
+      message: "CurseForge 整合包清单不是合法 JSON。",
+      detail: {
+        entryName: "manifest.json"
+      }
+    });
   });
 
   it("parses packwiz directory metadata and index", async () => {

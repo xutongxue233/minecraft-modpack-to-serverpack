@@ -4,13 +4,21 @@ import type { LoaderType, ModFileDescriptor } from "@mcsp/shared";
 import { readZipText } from "../archive/zip";
 
 type UnknownRecord = Record<string, unknown>;
-type RawJarModMetadata = Omit<JarModMetadata, "modId" | "name" | "version" | "loader" | "env"> & {
+type RawJarModMetadata = Omit<JarModMetadata, "modId" | "name" | "version" | "loader" | "env" | "dependencies"> & {
   modId?: string | undefined;
   name?: string | undefined;
   version?: string | undefined;
   loader?: LoaderType | undefined;
   env?: ModFileDescriptor["env"] | undefined;
+  dependencies?: JarModDependency[] | undefined;
 };
+
+export interface JarModDependency {
+  modId: string;
+  mandatory: boolean;
+  side?: "BOTH" | "CLIENT" | "SERVER";
+  versionRange?: string;
+}
 
 export interface JarModMetadata {
   modId?: string;
@@ -18,7 +26,12 @@ export interface JarModMetadata {
   version?: string;
   loader?: LoaderType;
   env?: ModFileDescriptor["env"];
+  dependencies?: JarModDependency[];
   source: "fabric.mod.json" | "quilt.mod.json" | "mods.toml" | "neoforge.mods.toml" | "mcmod.info";
+}
+
+export interface ScanDownloadedJarMetadataOptions {
+  onWarning?: (message: string) => void;
 }
 
 export async function scanJarMetadata(jarPath: string): Promise<JarModMetadata | null> {
@@ -51,9 +64,11 @@ export async function scanJarMetadata(jarPath: string): Promise<JarModMetadata |
 }
 
 export async function scanDownloadedJarMetadata(
-  entries: Array<{ file: ModFileDescriptor; cachePath: string }>
+  entries: Array<{ file: ModFileDescriptor; cachePath: string }>,
+  options: ScanDownloadedJarMetadataOptions = {}
 ): Promise<Map<ModFileDescriptor, JarModMetadata>> {
   const metadataByFile = new Map<ModFileDescriptor, JarModMetadata>();
+  const metadataErrors: Array<{ fileName: string; error: string }> = [];
 
   await Promise.all(
     entries.map(async (entry) => {
@@ -61,12 +76,23 @@ export async function scanDownloadedJarMetadata(
         return;
       }
 
-      const metadata = await scanJarMetadata(entry.cachePath);
-      if (metadata) {
-        metadataByFile.set(entry.file, metadata);
+      try {
+        const metadata = await scanJarMetadata(entry.cachePath);
+        if (metadata) {
+          metadataByFile.set(entry.file, metadata);
+        }
+      } catch (error) {
+        metadataErrors.push({
+          fileName: entry.file.fileName,
+          error: formatError(error)
+        });
       }
     })
   );
+
+  if (metadataErrors.length > 0) {
+    options.onWarning?.(formatMetadataErrorWarning(metadataErrors));
+  }
 
   return metadataByFile;
 }
@@ -113,6 +139,7 @@ function parseForgeLikeModsToml(text: string, loader: "forge" | "neoforge"): Jar
     version: asString(primaryMod.version),
     loader,
     env: inferForgeEnvFromDependencies(toml, modId, loader),
+    dependencies: parseForgeDependencies(toml, modId),
     source: loader === "neoforge" ? "neoforge.mods.toml" : "mods.toml"
   });
 }
@@ -174,6 +201,40 @@ function inferForgeEnvFromDependencies(
   return undefined;
 }
 
+function parseForgeDependencies(toml: UnknownRecord, modId: string | undefined): JarModDependency[] | undefined {
+  if (!modId) {
+    return undefined;
+  }
+
+  const dependencies = asRecord(toml.dependencies);
+  const modDependencies = asArray(dependencies[modId]).map(asRecord);
+  const parsedDependencies = modDependencies.flatMap((dependency) => {
+    const dependencyModId = asString(dependency.modId);
+    if (!dependencyModId) {
+      return [];
+    }
+
+    return [
+      {
+        modId: dependencyModId,
+        mandatory: dependency.mandatory === true,
+        ...optionalProp("side", normalizeForgeDependencySide(asString(dependency.side))),
+        ...optionalProp("versionRange", asString(dependency.versionRange))
+      }
+    ];
+  });
+
+  return parsedDependencies.length > 0 ? parsedDependencies : undefined;
+}
+
+function normalizeForgeDependencySide(value: string | undefined): JarModDependency["side"] | undefined {
+  const upper = value?.toUpperCase();
+  if (upper === "BOTH" || upper === "CLIENT" || upper === "SERVER") {
+    return upper;
+  }
+  return undefined;
+}
+
 function pruneMetadata(metadata: RawJarModMetadata): JarModMetadata {
   return {
     ...(metadata.modId === undefined ? {} : { modId: metadata.modId }),
@@ -181,6 +242,7 @@ function pruneMetadata(metadata: RawJarModMetadata): JarModMetadata {
     ...(metadata.version === undefined ? {} : { version: metadata.version }),
     ...(metadata.loader === undefined ? {} : { loader: metadata.loader }),
     ...(metadata.env === undefined ? {} : { env: metadata.env }),
+    ...(metadata.dependencies === undefined ? {} : { dependencies: metadata.dependencies }),
     source: metadata.source
   };
 }
@@ -201,6 +263,28 @@ function asString(value: unknown): string | undefined {
   return trimmed.length > 0 && trimmed !== "${file.jarVersion}" ? trimmed : undefined;
 }
 
+function optionalProp<TKey extends string, TValue>(
+  key: TKey,
+  value: TValue | undefined
+): TValue extends undefined ? Record<TKey, never> : Partial<Record<TKey, TValue>> {
+  return (value === undefined ? {} : { [key]: value }) as TValue extends undefined
+    ? Record<TKey, never>
+    : Partial<Record<TKey, TValue>>;
+}
+
 export function inferModNameFromFile(file: ModFileDescriptor): string {
   return file.name ?? path.basename(file.fileName, path.extname(file.fileName));
+}
+
+function formatError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function formatMetadataErrorWarning(errors: Array<{ fileName: string; error: string }>): string {
+  const samples = errors
+    .slice(0, 3)
+    .map((entry) => `${entry.fileName}（${entry.error}）`)
+    .join("；");
+  const suffix = errors.length > 3 ? " 等" : "";
+  return `${errors.length} 个 Mod 的 JAR 元数据无法解析，已跳过元数据读取；这通常是旧版 Forge mcmod.info 非标准 JSON，不影响 Mod 文件复制。示例：${samples}${suffix}。`;
 }

@@ -6,6 +6,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { appError, unknownToAppError } from "@mcsp/shared";
 import type { ServerCorePlan } from "./server-core";
+import { buildJavaEnv, detectJavaRuntime, javaRuntimeRequirementForCore, resolveJavaCommand } from "./java-runtime";
 
 const execFileAsync = promisify(execFile);
 
@@ -252,81 +253,23 @@ async function runJavaInstaller(options: PrepareServerCoreOptions, installerPath
 
 async function assertCompatibleJava(options: PrepareServerCoreOptions): Promise<void> {
   const core = options.core;
-  const detected = await detectJavaMajor(options.javaHome);
-  if (detected === null) {
+  const runtime = await detectJavaRuntime(options.javaHome);
+  if (!runtime) {
     throw appError("E_SERVER_CORE_INSTALL_FAILED", "未检测到可用的 Java，无法直接安装服务端核心。", {
       suggestion: "请在应用内配置兼容的 Java Home，或取消“直接下载核心”后在服务器环境运行 install-server 脚本。"
     });
   }
 
-  if (detected < core.javaMajor) {
+  const requirement = javaRuntimeRequirementForCore(core);
+  if (runtime.major < requirement.minMajor || (requirement.maxMajor !== undefined && runtime.major > requirement.maxMajor)) {
     throw appError(
       "E_SERVER_CORE_INSTALL_FAILED",
-      `当前 java 是 Java ${detected}，${core.type} ${core.minecraftVersion ?? ""} 需要 Java ${core.javaMajor} 或更高版本。`,
+      `当前 java 是 Java ${runtime.major}，${core.type} ${core.minecraftVersion ?? ""} 需要 ${requirement.label}。`,
       {
         suggestion: "请在应用内配置兼容的 Java Home，或把 PATH 中的 java 切换到兼容版本。"
       }
     );
   }
-}
-
-async function detectJavaMajor(javaHome?: string): Promise<number | null> {
-  const javaCommand = resolveJavaCommand(javaHome);
-  try {
-    const result = await execFileAsync(javaCommand, ["-version"], {
-      env: buildJavaEnv(javaHome),
-      timeout: 10_000,
-      windowsHide: true
-    });
-    return parseJavaMajor(`${result.stdout}\n${result.stderr}`);
-  } catch (error) {
-    const maybeOutput = error as { stdout?: unknown; stderr?: unknown };
-    const output = `${typeof maybeOutput.stdout === "string" ? maybeOutput.stdout : ""}\n${typeof maybeOutput.stderr === "string" ? maybeOutput.stderr : ""}`;
-    return parseJavaMajor(output);
-  }
-}
-
-function resolveJavaCommand(javaHome?: string): string {
-  const normalized = javaHome?.trim();
-  if (!normalized) {
-    return "java";
-  }
-  return path.join(normalized, "bin", process.platform === "win32" ? "java.exe" : "java");
-}
-
-function buildJavaEnv(javaHome?: string): NodeJS.ProcessEnv {
-  const env = { ...process.env };
-  const normalized = javaHome?.trim();
-  if (!normalized) {
-    return env;
-  }
-
-  env.JAVA_HOME = normalized;
-  const pathKey = Object.keys(env).find((key) => key.toLowerCase() === "path") ?? "PATH";
-  const currentPath = env[pathKey] ?? "";
-  env[pathKey] = `${path.join(normalized, "bin")}${path.delimiter}${currentPath}`;
-  return env;
-}
-
-function parseJavaMajor(output: string): number | null {
-  const match = /version "(?<version>[^"]+)"/.exec(output) ?? /openjdk (?<version>\d+(?:\.\d+)?)/i.exec(output);
-  const version = match?.groups?.version;
-  if (!version) {
-    return null;
-  }
-
-  const parts = version.split(".").map((part) => Number.parseInt(part, 10));
-  const first = parts[0];
-  const second = parts[1];
-  if (first === undefined || !Number.isFinite(first)) {
-    return null;
-  }
-
-  if (first === 1 && second !== undefined && Number.isFinite(second)) {
-    return second;
-  }
-
-  return first;
 }
 
 function formatExecError(error: unknown): string {
@@ -466,12 +409,12 @@ async function cleanServerCoreArtifacts(outputDir: string): Promise<void> {
   const generatedLogs = await fs.readdir(outputDir).catch(() => []);
   await Promise.all(
     generatedLogs
-      .filter((fileName) => /^.+-installer\.jar\.log$/i.test(fileName))
+      .filter((fileName) => /^.+-installer\.jar\.log$/i.test(fileName) || isLegacyForgeLaunchJar(fileName) || isMinecraftServerJar(fileName))
       .map((fileName) => fs.rm(path.join(outputDir, fileName), { force: true }).catch(() => undefined))
   );
 }
 
-async function collectInstalledCoreFiles(outputDir: string): Promise<string[]> {
+export async function collectInstalledCoreFiles(outputDir: string): Promise<string[]> {
   const candidates = [
     "server.jar",
     "fabric-server-launch.jar",
@@ -496,6 +439,8 @@ async function collectInstalledCoreFiles(outputDir: string): Promise<string[]> {
 
   const forgeArgFiles = await collectForgeArgumentFiles(outputDir);
   files.push(...forgeArgFiles);
+  files.push(...(await collectRootFiles(outputDir, isLegacyForgeLaunchJar)));
+  files.push(...(await collectRootFiles(outputDir, isMinecraftServerJar)));
   return files;
 }
 
@@ -516,9 +461,13 @@ async function assertInstalledCoreIsLaunchable(outputDir: string, core: ServerCo
       if (forgeArgs.length > 0) {
         return;
       }
+      const legacyForgeJars = await collectRootFiles(outputDir, isLegacyForgeLaunchJar);
+      if (legacyForgeJars.length > 0) {
+        return;
+      }
       throw appError(
         "E_SERVER_CORE_INSTALL_FAILED",
-        `${core.type === "forge" ? "Forge" : "NeoForge"} 安装器执行结束，但没有生成可启动参数文件。`,
+        `${core.type === "forge" ? "Forge" : "NeoForge"} 安装器执行结束，但没有生成可启动参数文件或旧版 Forge 启动 jar。`,
         {
           detail: {
             expectedFiles: [
@@ -527,7 +476,8 @@ async function assertInstalledCoreIsLaunchable(outputDir: string, core: ServerCo
               "libraries/net/neoforged/forge/*/win_args.txt",
               "libraries/net/neoforged/forge/*/unix_args.txt",
               "libraries/net/neoforged/neoforge/*/win_args.txt",
-              "libraries/net/neoforged/neoforge/*/unix_args.txt"
+              "libraries/net/neoforged/neoforge/*/unix_args.txt",
+              "forge-*.jar"
             ]
           },
           suggestion: "请删除当前输出目录后重新生成，并确认配置了兼容的 Java Home；也可以在输出目录手动运行 install-server.bat 查看安装器完整日志。"
@@ -583,6 +533,22 @@ async function collectForgeArgumentFiles(outputDir: string): Promise<string[]> {
   }
 
   return files.sort();
+}
+
+async function collectRootFiles(outputDir: string, predicate: (fileName: string) => boolean): Promise<string[]> {
+  const entries = await fs.readdir(outputDir, { withFileTypes: true }).catch(() => []);
+  return entries
+    .filter((entry) => entry.isFile() && predicate(entry.name))
+    .map((entry) => entry.name)
+    .sort();
+}
+
+function isLegacyForgeLaunchJar(fileName: string): boolean {
+  return /^forge-.+\.jar$/i.test(fileName) && !/-installer\.jar$/i.test(fileName);
+}
+
+function isMinecraftServerJar(fileName: string): boolean {
+  return /^minecraft_server\..+\.jar$/i.test(fileName);
 }
 
 function parseContentLength(value: string | null): number | undefined {

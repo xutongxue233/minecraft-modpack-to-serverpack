@@ -3,8 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import type { ModFileDescriptor } from "@mcsp/shared";
 import { describe, expect, it } from "vitest";
-import { decideMods } from "./decisions";
-import { loadModDecisionRules, loadRemoteModDecisionRules } from "./user-rules";
+import { decideMods } from "../../src/mod-analysis/decisions";
+import { loadModDecisionRules, loadRemoteModDecisionRules } from "../../src/mod-analysis/user-rules";
 
 describe("loadModDecisionRules", () => {
   it("loads JSON include and exclude buckets", async () => {
@@ -204,7 +204,11 @@ describe("loadModDecisionRules", () => {
       modFile("Xaeros_Minimap_25.3.2_Forge_1.20.jar", "xaerominimap"),
       modFile("XaerosWorldMap_1.40.2_Forge_1.20.jar", "xaeroworldmap"),
       modFile("jei-1.20.1-forge-15.20.0.112.jar", "jei"),
+      modFile("JeiTweaker-forge-1.20.1-8.0.6.jar", "jeitweaker"),
       modFile("Jade-1.20.1-Forge-11.13.2.jar", "jade"),
+      modFile("forgeautofish-6.0.0-1.20.1.jar", "forgeautofish"),
+      modFile("enhanced_boss_bars-1.20.1-1.0.0.jar", "enhanced_boss_bars"),
+      modFile("LegendaryTooltips-1.20.1-forge-1.4.5.jar", "legendarytooltips"),
       modFile("CustomSkinLoader_ForgeActive-14.19.1.jar", "customskinloader"),
       modFile("AdvancedLootInfo-forge-1.20.1-1.12.0.jar", "ali"),
       modFile("tfc_support_indicator-1.0.3+mc1.20.1.jar", "tfc_support_indicator"),

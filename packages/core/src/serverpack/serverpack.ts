@@ -32,7 +32,7 @@ export interface GenerateServerpackOptions {
 
 const installScripts = ["install-server.ps1", "install-server.bat", "install-server.sh"] as const;
 const startScripts = ["start.ps1", "start.bat", "start.sh"] as const;
-const supportFiles = ["server-core.json", "user_jvm_args.txt", "eula.txt", "server.properties"] as const;
+const supportFiles = ["user_jvm_args.txt", "eula.txt", "server.properties"] as const;
 const optimizedStartScripts = ["start-optimized.bat", "start-optimized.sh"] as const;
 
 export async function generateServerpack(options: GenerateServerpackOptions): Promise<ServerpackGenerationResult> {
@@ -41,14 +41,13 @@ export async function generateServerpack(options: GenerateServerpackOptions): Pr
   warnings.push(...core.warnings);
   warnings.push(...options.coreInstall.warnings);
 
-  const writtenModFiles = await writeIncludedMods({
+  const { written: writtenModFiles, skipped: skippedModFiles } = await writeIncludedMods({
     outputDir: options.outputDir,
     files: options.analysis.files,
     decisions: options.decisions,
     downloadResultsByFile: options.downloadResultsByFile,
     warnings
   });
-  const skippedModFiles = Math.max(0, options.analysis.files.length - writtenModFiles);
   const mergedOverrideFiles = await mergeOverrides({
     inputPath: options.inputPath,
     outputDir: options.outputDir,
@@ -69,7 +68,7 @@ export async function generateServerpack(options: GenerateServerpackOptions): Pr
     mergedOverrideFiles,
     installScripts: [...installScripts],
     startScripts: writtenStartScripts,
-    supportFiles: writtenSupportFiles,
+    supportFiles: ["server-core.json", ...writtenSupportFiles],
     coreInstall: options.coreInstall,
     warnings
   };
@@ -87,13 +86,14 @@ async function writeIncludedMods({
   decisions: ModDecision[];
   downloadResultsByFile: Map<ModFileDescriptor, DownloadResult>;
   warnings: string[];
-}): Promise<number> {
+}): Promise<{ written: number; skipped: number }> {
   const modsDir = path.join(outputDir, "mods");
   await fs.rm(modsDir, { recursive: true, force: true });
   await fs.mkdir(modsDir, { recursive: true });
 
   const usedNames = new Set<string>();
   let written = 0;
+  let skipped = 0;
 
   for (const [index, file] of files.entries()) {
     const decision = decisions[index];
@@ -104,6 +104,7 @@ async function writeIncludedMods({
     const downloadResult = downloadResultsByFile.get(file);
     if (!downloadResult) {
       warnings.push(`${file.fileName} 已判定需要进入服务端，但没有可复制的下载文件。`);
+      skipped += 1;
       continue;
     }
 
@@ -112,7 +113,7 @@ async function writeIncludedMods({
     written += 1;
   }
 
-  return written;
+  return { written, skipped };
 }
 
 async function mergeOverrides({
@@ -129,17 +130,20 @@ async function mergeOverrides({
   if (analysis.overrides.client > 0) {
     warnings.push(`检测到 ${analysis.overrides.client} 个 client-overrides 文件，已按服务端包规则忽略。`);
   }
+  const localModEntryNames = new Set(
+    analysis.files.flatMap((file) => (file.source === "local" && file.pathInPack ? [file.pathInPack] : []))
+  );
 
   if (analysis.metadata.type === "modrinth") {
     const common = await extractZipEntries(inputPath, outputDir, {
       prefixes: ["overrides/"],
       stripPrefix: "overrides/",
-      shouldExtract: makeServerOverrideFilter(warnings)
+      shouldExtract: makeServerOverrideFilter(warnings, localModEntryNames)
     });
     const server = await extractZipEntries(inputPath, outputDir, {
       prefixes: ["server-overrides/"],
       stripPrefix: "server-overrides/",
-      shouldExtract: makeServerOverrideFilter(warnings)
+      shouldExtract: makeServerOverrideFilter(warnings, localModEntryNames)
     });
     return common.length + server.length;
   }
@@ -148,7 +152,7 @@ async function mergeOverrides({
     const common = await extractZipEntries(inputPath, outputDir, {
       prefixes: ["overrides/"],
       stripPrefix: "overrides/",
-      shouldExtract: makeServerOverrideFilter(warnings)
+      shouldExtract: makeServerOverrideFilter(warnings, localModEntryNames)
     });
     return common.length;
   }
@@ -236,10 +240,17 @@ async function writeTextIfMissing(filePath: string, content: string): Promise<vo
   }
 }
 
-function makeServerOverrideFilter(warnings: string[]): (relativePath: string, entryName: string) => boolean {
+function makeServerOverrideFilter(
+  warnings: string[],
+  localModEntryNames: ReadonlySet<string>
+): (relativePath: string, entryName: string) => boolean {
   const warned = new Set<string>();
 
   return (relativePath, entryName) => {
+    if (localModEntryNames.has(entryName)) {
+      return false;
+    }
+
     const reason = getOverrideSkipReason(relativePath);
     if (!reason) {
       return true;
@@ -615,6 +626,8 @@ function renderStartPowerShell(): string {
     "  $Candidates = New-Object 'System.Collections.Generic.List[string]'",
     "  [void]$Candidates.Add(\"fabric-server-launch.jar\")",
     "  [void]$Candidates.Add(\"quilt-server-launch.jar\")",
+    "  $LegacyForgeJar = Get-ChildItem -LiteralPath $PSScriptRoot -Filter \"forge-*.jar\" -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -notlike \"*-installer.jar\" } | Sort-Object Name -Descending | Select-Object -First 1",
+    "  if ($LegacyForgeJar) { [void]$Candidates.Add($LegacyForgeJar.Name) }",
     "  [void]$Candidates.Add(\"server.jar\")",
     "  foreach ($Candidate in $Candidates) {",
     "    if (Test-Path -LiteralPath $Candidate) { return $Candidate }",
@@ -679,6 +692,17 @@ function renderStartBatch(options: { optimized?: boolean } = {}): string {
     "  exit /b %ERRORLEVEL%",
     ")",
     "",
+    "set \"LEGACY_FORGE_JAR=\"",
+    "for %%F in (\"%~dp0forge-*.jar\") do if exist \"%%~fF\" if not defined LEGACY_FORGE_JAR set \"LEGACY_FORGE_JAR=%%~fF\"",
+    "if defined LEGACY_FORGE_JAR (",
+    "  if \"%~1\"==\"\" (",
+    `    "%JAVA_CMD%" ${jvmArgs} -jar "%LEGACY_FORGE_JAR%" nogui`,
+    "  ) else (",
+    `    "%JAVA_CMD%" ${jvmArgs} -jar "%LEGACY_FORGE_JAR%" %*`,
+    "  )",
+    "  exit /b %ERRORLEVEL%",
+    ")",
+    "",
     "if exist fabric-server-launch.jar (",
     "  if \"%~1\"==\"\" (",
     `    "%JAVA_CMD%" ${jvmArgs} -jar fabric-server-launch.jar nogui`,
@@ -736,6 +760,19 @@ function renderStartShell(options: { optimized?: boolean } = {}): string {
     "forge_args_file=\"$(find_forge_args_file || true)\"",
     "if [[ -n \"$forge_args_file\" ]]; then",
     `  exec "$JAVA_CMD" ${jvmArgs} @"$forge_args_file" "\${server_args[@]}"`,
+    "fi",
+    "",
+    "find_legacy_forge_jar() {",
+    "  local file",
+    "  for file in ./forge-*.jar; do",
+    "    if [[ -f \"$file\" && \"$file\" != *-installer.jar ]]; then printf '%s\\n' \"$file\"; return 0; fi",
+    "  done",
+    "  return 1",
+    "}",
+    "",
+    "legacy_forge_jar=\"$(find_legacy_forge_jar || true)\"",
+    "if [[ -n \"$legacy_forge_jar\" ]]; then",
+    `  exec "$JAVA_CMD" ${jvmArgs} -jar "$legacy_forge_jar" "\${server_args[@]}"`,
     "fi",
     "",
     "for jar in fabric-server-launch.jar quilt-server-launch.jar server.jar; do",

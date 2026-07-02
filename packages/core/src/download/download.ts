@@ -47,6 +47,7 @@ const defaultDownloadOptions = {
   timeoutSeconds: 60,
   allowInsecureHttp: false
 };
+const maxDownloadAttemptsPerFile = 12;
 
 export async function downloadFilesToCache(
   files: ModFileDescriptor[],
@@ -96,25 +97,36 @@ export async function downloadFileToCache(file: ModFileDescriptor, options: Down
   }
 
   let lastError: unknown;
-  for (const rawUrl of file.downloadUrls) {
-    const url = validateDownloadUrl(rawUrl, options.allowInsecureHttp ?? defaultDownloadOptions.allowInsecureHttp);
-    const maxAttempts = (options.retry ?? defaultDownloadOptions.retry) + 1;
+  const urls = normalizedDownloadUrls(file.downloadUrls, options, (error) => {
+    lastError = error;
+  });
+  if (urls.length === 0) {
+    if (isAppError(lastError)) {
+      throw lastError;
+    }
+    throw appError("E_DOWNLOAD_FAILED", "文件没有可用下载地址。", {
+      detail: { fileName: file.fileName, source: file.source },
+      suggestion: "请检查整合包清单，或为 CurseForge 文件配置 API key 后再转换。"
+    });
+  }
 
-    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      try {
-        return await downloadUrlToCache(file, url, options);
-      } catch (error) {
-        lastError = error;
-        if (attempt < maxAttempts) {
-          options.onProgress?.({
-            type: "retry",
-            fileName: file.fileName,
-            url,
-            attempt,
-            maxAttempts,
-            error: error instanceof Error ? error.message : String(error)
-          });
-        }
+  const configuredAttempts = Math.max(1, (options.retry ?? defaultDownloadOptions.retry) + 1);
+  const maxAttempts = Math.min(Math.max(configuredAttempts, urls.length), maxDownloadAttemptsPerFile);
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const url = urls[(attempt - 1) % urls.length]!;
+    try {
+      return await downloadUrlToCache(file, url, options);
+    } catch (error) {
+      lastError = error;
+      if (attempt < maxAttempts) {
+        options.onProgress?.({
+          type: "retry",
+          fileName: file.fileName,
+          url,
+          attempt,
+          maxAttempts,
+          error: error instanceof Error ? error.message : String(error)
+        });
       }
     }
   }
@@ -127,6 +139,27 @@ export async function downloadFileToCache(file: ModFileDescriptor, options: Down
     detail: lastError,
     suggestion: "请检查网络连接、下载地址和整合包来源。"
   });
+}
+
+function normalizedDownloadUrls(
+  rawUrls: string[],
+  options: Pick<DownloadOptions, "allowInsecureHttp">,
+  onInvalidUrl: (error: unknown) => void
+): string[] {
+  const urls: string[] = [];
+  const seen = new Set<string>();
+  for (const rawUrl of rawUrls) {
+    try {
+      const url = validateDownloadUrl(rawUrl, options.allowInsecureHttp ?? defaultDownloadOptions.allowInsecureHttp);
+      if (!seen.has(url)) {
+        urls.push(url);
+        seen.add(url);
+      }
+    } catch (error) {
+      onInvalidUrl(error);
+    }
+  }
+  return urls;
 }
 
 export function validateDownloadUrl(rawUrl: string, allowInsecureHttp = false): string {
@@ -155,6 +188,50 @@ export function validateDownloadUrl(rawUrl: string, allowInsecureHttp = false): 
     detail: rawUrl,
     suggestion: "请更换可信来源，或在高级设置中显式允许不安全 HTTP。"
   });
+}
+
+const redirectStatuses = new Set([301, 302, 303, 307, 308]);
+
+async function fetchWithValidatedRedirects(
+  fetchImpl: typeof fetch,
+  initialUrl: string,
+  init: RequestInit,
+  allowInsecureHttp: boolean
+): Promise<Response> {
+  const maxRedirects = 5;
+  let currentUrl = initialUrl;
+
+  for (let redirectCount = 0; ; redirectCount += 1) {
+    const response = await fetchImpl(currentUrl, { ...init, redirect: "manual" });
+    if (!redirectStatuses.has(response.status)) {
+      return response;
+    }
+
+    const location = response.headers.get("location");
+    if (!location) {
+      return response;
+    }
+
+    if (redirectCount >= maxRedirects) {
+      throw appError("E_DOWNLOAD_FAILED", "下载重定向次数过多。", {
+        detail: { url: initialUrl, maxRedirects },
+        suggestion: "请更换更直接的下载源。"
+      });
+    }
+
+    let resolvedUrl: string;
+    try {
+      resolvedUrl = new URL(location, currentUrl).href;
+    } catch {
+      throw appError("E_DOWNLOAD_FAILED", "下载重定向地址无效。", {
+        detail: { from: currentUrl, location },
+        suggestion: "请检查下载源的重定向配置。"
+      });
+    }
+
+    // Re-apply the HTTPS/no-credentials policy to every hop, not just the first URL.
+    currentUrl = validateDownloadUrl(resolvedUrl, allowInsecureHttp);
+  }
 }
 
 export async function verifyFileHash(
@@ -222,7 +299,12 @@ async function downloadUrlToCache(
     options.onProgress?.({ type: "file-start", fileName: file.fileName, url });
     await fs.mkdir(path.dirname(tempPath), { recursive: true });
 
-    const response = await fetchImpl(url, { signal: controller.signal });
+    const response = await fetchWithValidatedRedirects(
+      fetchImpl,
+      url,
+      { signal: controller.signal },
+      options.allowInsecureHttp ?? defaultDownloadOptions.allowInsecureHttp
+    );
     if (!response.ok) {
       throw appError("E_DOWNLOAD_FAILED", `下载失败：HTTP ${response.status}。`, {
         detail: { fileName: file.fileName, url, status: response.status },
@@ -240,12 +322,11 @@ async function downloadUrlToCache(
       });
     });
     const hash = await verifyFileHash(tempPath, file.expectedHashes);
-    const finalHash = hash ?? {
-      algorithm: "sha256" as const,
-      expected: await calculateFileHash(tempPath, "sha256"),
-      actual: await calculateFileHash(tempPath, "sha256")
-    };
-    const cachePath = cachePathForHash(options.cacheDir, finalHash.algorithm, finalHash.expected, file.fileName);
+    // When no hash is declared we can't verify integrity; derive a content-addressed
+    // cache key from a single sha256 pass instead of fabricating an expected===actual record.
+    const cacheAlgorithm: SupportedHashAlgorithm = hash?.algorithm ?? "sha256";
+    const cacheDigest = hash?.expected ?? (await calculateFileHash(tempPath, "sha256"));
+    const cachePath = cachePathForHash(options.cacheDir, cacheAlgorithm, cacheDigest, file.fileName);
     await moveIntoCache(tempPath, cachePath);
 
     options.onProgress?.({ type: "file-complete", fileName: file.fileName, cachePath, sizeBytes });

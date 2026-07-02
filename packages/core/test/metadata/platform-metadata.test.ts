@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AnalyzeResult } from "@mcsp/shared";
-import { enrichAnalysisWithPlatformMetadata } from "./platform-metadata";
+import { enrichAnalysisWithPlatformMetadata } from "../../src/metadata/platform-metadata";
 
 describe("enrichAnalysisWithPlatformMetadata", () => {
   it("enriches CurseForge files with project name, filename, hashes and download urls", async () => {
@@ -61,7 +61,63 @@ describe("enrichAnalysisWithPlatformMetadata", () => {
       expectedHashes: { sha1: "abc123" },
       metadataSource: "curseforge-api"
     });
+    expect(result.files[0]?.downloadUrls).toContain("https://mod.mcimirror.top/files/5678/example-mod.jar");
     expect(result.files[0]?.downloadUrls).toContain("https://edge.forgecdn.net/files/5678/example-mod.jar");
+  });
+
+  it("builds CurseForge CDN fallback urls from file id and filename when downloadUrl is missing", async () => {
+    const analysis = baseAnalysis({
+      type: "curseforge",
+      files: [
+        {
+          id: "224770:4486512",
+          projectId: "224770",
+          fileId: "4486512",
+          fileName: "4486512.jar",
+          source: "curseforge",
+          downloadUrls: [],
+          expectedHashes: {},
+          metadataSource: "manifest"
+        }
+      ]
+    });
+
+    const result = await enrichAnalysisWithPlatformMetadata(analysis, {
+      curseForgeApiKey: "test-key",
+      fetchImpl: async (input) => {
+        const url = String(input);
+        if (url.endsWith("/mods/files")) {
+          return jsonResponse({
+            data: [
+              {
+                id: 4486512,
+                modId: 224770,
+                displayName: "Lycanites Mobs 2.0.8.9",
+                fileName: "lycanitesmobs-1.12.2-2.0.8.9.jar",
+                hashes: []
+              }
+            ]
+          });
+        }
+        if (url.endsWith("/mods")) {
+          return jsonResponse({
+            data: [{ id: 224770, name: "Lycanites Mobs", slug: "lycanites-mobs" }]
+          });
+        }
+        throw new Error(`Unexpected URL: ${url}`);
+      }
+    });
+
+    expect(result.files[0]).toMatchObject({
+      fileName: "lycanitesmobs-1.12.2-2.0.8.9.jar",
+      metadataSource: "curseforge-api"
+    });
+    expect(result.files[0]?.downloadUrls).toEqual([
+      "https://mod.mcimirror.top/files/4486/512/lycanitesmobs-1.12.2-2.0.8.9.jar",
+      "https://mediafilez.forgecdn.net/files/4486/512/lycanitesmobs-1.12.2-2.0.8.9.jar",
+      "https://edge.forgecdn.net/files/4486/512/lycanitesmobs-1.12.2-2.0.8.9.jar",
+      "https://media.forgecdn.net/files/4486/512/lycanitesmobs-1.12.2-2.0.8.9.jar"
+    ]);
   });
 
   it("enriches Modrinth files with project title and server side metadata", async () => {
@@ -123,6 +179,7 @@ describe("enrichAnalysisWithPlatformMetadata", () => {
       envSource: "platform-api",
       metadataSource: "modrinth-api"
     });
+    expect(result.files[0]?.downloadUrls).toContain("https://mod.mcimirror.top/data/project-id/versions/version-id/example-mod.jar");
   });
 });
 

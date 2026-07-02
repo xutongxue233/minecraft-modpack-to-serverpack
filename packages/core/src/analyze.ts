@@ -82,7 +82,7 @@ async function exists(filePath: string): Promise<boolean> {
 }
 
 function parseModrinthIndex(text: string, entryNames: string[]): AnalyzeResult {
-  const index = JSON.parse(text) as UnknownRecord;
+  const index = parseJsonRecord(text, "Modrinth 整合包清单", "modrinth.index.json");
   const dependencies = asRecord(index.dependencies);
   const files = asArray(index.files);
   const metadata: PackMetadata = {
@@ -95,7 +95,7 @@ function parseModrinthIndex(text: string, entryNames: string[]): AnalyzeResult {
 
   return {
     metadata,
-    files: files.map(parseModrinthFile),
+    files: [...files.map(parseModrinthFile), ...collectLocalOverrideMods(entryNames, ["overrides/", "server-overrides/"])],
     overrides: countOverrides(entryNames),
     warnings: []
   };
@@ -129,7 +129,7 @@ function parseModrinthFile(file: unknown): ModFileDescriptor {
 }
 
 function parseCurseForgeManifest(text: string, entryNames: string[]): AnalyzeResult {
-  const manifest = JSON.parse(text) as UnknownRecord;
+  const manifest = parseJsonRecord(text, "CurseForge 整合包清单", "manifest.json");
   const minecraft = asRecord(manifest.minecraft);
   const modLoaders = asArray(minecraft.modLoaders);
   const primaryLoader = modLoaders.map(asRecord).find((loader) => loader.primary === true) ?? asRecord(modLoaders[0]);
@@ -144,21 +144,24 @@ function parseCurseForgeManifest(text: string, entryNames: string[]): AnalyzeRes
       ...optionalProp("minecraftVersion", asString(minecraft.version)),
       ...loaderInfo
     },
-    files: files.map((file) => {
-      const record = asRecord(file);
-      const projectId = numberToString(record.projectID ?? record.projectId);
-      const fileId = numberToString(record.fileID ?? record.fileId);
-      return {
-        ...optionalProp("id", projectId && fileId ? `${projectId}:${fileId}` : undefined),
-        ...optionalProp("projectId", projectId),
-        ...optionalProp("fileId", fileId),
-        fileName: fileId ? `${fileId}.jar` : "curseforge-file.jar",
-        source: "curseforge",
-        downloadUrls: [],
-        expectedHashes: {},
-        metadataSource: "manifest"
-      };
-    }),
+    files: [
+      ...files.map((file): ModFileDescriptor => {
+        const record = asRecord(file);
+        const projectId = numberToString(record.projectID ?? record.projectId);
+        const fileId = numberToString(record.fileID ?? record.fileId);
+        return {
+          ...optionalProp("id", projectId && fileId ? `${projectId}:${fileId}` : undefined),
+          ...optionalProp("projectId", projectId),
+          ...optionalProp("fileId", fileId),
+          fileName: fileId ? `${fileId}.jar` : "curseforge-file.jar",
+          source: "curseforge",
+          downloadUrls: [],
+          expectedHashes: {},
+          metadataSource: "manifest"
+        };
+      }),
+      ...collectLocalOverrideMods(entryNames, ["overrides/"])
+    ],
     overrides: countOverrides(entryNames),
     warnings: []
   };
@@ -256,8 +259,44 @@ function countOverrides(entryNames: string[]) {
   };
 }
 
+function collectLocalOverrideMods(entryNames: string[], overridePrefixes: string[]): ModFileDescriptor[] {
+  return entryNames
+    .filter((entryName) => isLocalOverrideMod(entryName, overridePrefixes))
+    .sort((left, right) => left.localeCompare(right))
+    .map((entryName) => ({
+      fileName: path.basename(entryName),
+      source: "local",
+      downloadUrls: [],
+      expectedHashes: {},
+      pathInPack: entryName
+    }));
+}
+
+function isLocalOverrideMod(entryName: string, overridePrefixes: string[]): boolean {
+  const lower = entryName.toLowerCase();
+  if (!lower.endsWith(".jar")) {
+    return false;
+  }
+
+  return overridePrefixes.some((prefix) => lower.startsWith(`${prefix}mods/`));
+}
+
 function asRecord(value: unknown): UnknownRecord {
   return typeof value === "object" && value !== null ? (value as UnknownRecord) : {};
+}
+
+function parseJsonRecord(text: string, label: string, entryName: string): UnknownRecord {
+  try {
+    return asRecord(JSON.parse(text));
+  } catch (error) {
+    throw appError("E_INPUT_FORMAT", `${label}不是合法 JSON。`, {
+      detail: {
+        entryName,
+        error: formatError(error)
+      },
+      suggestion: "请确认整合包根目录清单文件未损坏，或重新导出整合包后再试。"
+    });
+  }
 }
 
 function asArray(value: unknown): unknown[] {
@@ -266,6 +305,10 @@ function asArray(value: unknown): unknown[] {
 
 function asString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
+}
+
+function formatError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function numberToString(value: unknown): string | undefined {

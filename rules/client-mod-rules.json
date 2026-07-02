@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-07-01T00:00:00.000Z",
+  "updatedAt": "2026-07-02T00:00:00.000Z",
   "rules": [
     {
       "id": "modmenu",
@@ -261,6 +261,17 @@
       }
     },
     {
+      "id": "jei-tweaker",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "JEI/CraftTweaker 客户端集成扩展，缺少 JEI 时会导致服务端插件初始化失败。",
+      "match": {
+        "modIds": ["jeitweaker"],
+        "slugs": ["jei-tweaker"]
+      },
+      "loaders": ["forge", "neoforge"]
+    },
+    {
       "id": "jei-multiblocks",
       "side": "client",
       "decision": "exclude",
@@ -279,6 +290,39 @@
         "modIds": ["jade"],
         "slugs": ["jade"]
       }
+    },
+    {
+      "id": "forge-autofish",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "客户端自动钓鱼 Mod，服务端加载会引用 client-only 类。",
+      "match": {
+        "modIds": ["forgeautofish"],
+        "slugs": ["autofish-for-forge", "forge-autofish"]
+      },
+      "loaders": ["forge", "neoforge"]
+    },
+    {
+      "id": "enhanced-boss-bars",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "客户端 Boss 血条界面增强 Mod，服务端加载会引用 client-only 类。",
+      "match": {
+        "modIds": ["enhanced_boss_bars"],
+        "slugs": ["enhanced-boss-bars"]
+      },
+      "loaders": ["forge", "neoforge"]
+    },
+    {
+      "id": "legendary-tooltips",
+      "side": "client",
+      "decision": "exclude",
+      "reason": "客户端物品 tooltip 美化 Mod，服务端加载会引用 client-only 类。",
+      "match": {
+        "modIds": ["legendarytooltips"],
+        "slugs": ["legendary-tooltips"]
+      },
+      "loaders": ["forge", "neoforge"]
     },
     {
       "id": "not-enough-recipe-book",

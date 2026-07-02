@@ -2,6 +2,7 @@
   "name": "@mcsp/desktop",
   "version": "0.1.0-alpha.3",
   "private": true,
+  "productName": "整合包转服务端包工具",
   "description": "Electron desktop application for converting Minecraft modpacks into server packs.",
   "author": "Minecraft Serverpack Tool Contributors",
   "type": "module",
@@ -29,6 +30,7 @@
     "electron": "^33.2.1",
     "electron-builder": "^25.1.8",
     "electron-vite": "^2.3.0",
+    "rcedit": "^5.0.2",
     "vite": "^6.0.7"
   }
 }

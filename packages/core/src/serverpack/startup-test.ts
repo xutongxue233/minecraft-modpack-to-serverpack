@@ -164,14 +164,12 @@ function runStartupProcess(
         emitBufferedLine(stdoutTail, "info", options.onLog);
         emitBufferedLine(stderrTail, "error", options.onLog);
 
-        if (code === 0 || isExpectedEulaGate(outputTail)) {
+        if (isExpectedEulaGate(outputTail)) {
           resolve({
             enabled: true,
             status: "passed",
             ...(code === null ? {} : { exitCode: code }),
-            reason: isExpectedEulaGate(outputTail)
-              ? "启动脚本测试通过：服务端已运行到 EULA 检查。"
-              : "启动脚本测试通过：启动脚本正常退出。"
+            reason: "启动脚本测试通过：服务端已运行到 EULA 检查。"
           });
           return;
         }

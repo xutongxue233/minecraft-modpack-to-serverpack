@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import yazl from "yazl";
-import { scanJarMetadata } from "./jar-metadata";
+import { scanDownloadedJarMetadata, scanJarMetadata } from "../../src/mod-analysis/jar-metadata";
 
 describe("scanJarMetadata", () => {
   it("reads Fabric metadata and maps client environment to server unsupported", async () => {
@@ -53,6 +53,49 @@ describe("scanJarMetadata", () => {
     });
   });
 
+  it("reads mandatory Forge mod dependencies from mods.toml", async () => {
+    const jarPath = await createJar({
+      "META-INF/mods.toml": [
+        'modLoader = "javafml"',
+        'loaderVersion = "[47,)"',
+        "",
+        "[[mods]]",
+        'modId = "exampleaddon"',
+        'displayName = "Example Addon"',
+        "",
+        "[[dependencies.exampleaddon]]",
+        'modId = "minecraft"',
+        "mandatory = true",
+        'versionRange = "[1.20.1]"',
+        'side = "BOTH"',
+        "",
+        "[[dependencies.exampleaddon]]",
+        'modId = "jade"',
+        "mandatory = true",
+        'versionRange = "[11.9.0,)"',
+        'side = "BOTH"'
+      ].join("\n")
+    });
+
+    await expect(scanJarMetadata(jarPath)).resolves.toMatchObject({
+      modId: "exampleaddon",
+      dependencies: [
+        {
+          modId: "minecraft",
+          mandatory: true,
+          versionRange: "[1.20.1]",
+          side: "BOTH"
+        },
+        {
+          modId: "jade",
+          mandatory: true,
+          versionRange: "[11.9.0,)",
+          side: "BOTH"
+        }
+      ]
+    });
+  });
+
   it("maps Forge client-side runtime dependencies to server unsupported", async () => {
     const jarPath = await createJar({
       "META-INF/mods.toml": [
@@ -82,6 +125,42 @@ describe("scanJarMetadata", () => {
       source: "mods.toml"
     });
   });
+
+  it("skips malformed downloaded jar metadata and reports an aggregated warning", async () => {
+    const goodJarPath = await createJar({
+      "META-INF/mods.toml": [
+        'modLoader = "javafml"',
+        'loaderVersion = "[47,)"',
+        "",
+        "[[mods]]",
+        'modId = "goodmod"',
+        'displayName = "Good Mod"'
+      ].join("\n")
+    });
+    const badJarPath = await createJar({
+      "mcmod.info": '{ "modList": [{ "name": "bad\nmetadata" }] }'
+    });
+    const warnings: string[] = [];
+    const goodFile = modFile("good.jar");
+    const badFile = modFile("bad.jar");
+
+    const result = await scanDownloadedJarMetadata(
+      [
+        { file: goodFile, cachePath: goodJarPath },
+        { file: badFile, cachePath: badJarPath }
+      ],
+      { onWarning: (message) => warnings.push(message) }
+    );
+
+    expect(result.get(goodFile)).toMatchObject({
+      modId: "goodmod",
+      name: "Good Mod"
+    });
+    expect(result.has(badFile)).toBe(false);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("1 个 Mod 的 JAR 元数据无法解析");
+    expect(warnings[0]).toContain("bad.jar");
+  });
 });
 
 async function createJar(entries: Record<string, string>): Promise<string> {
@@ -105,4 +184,13 @@ function writeZip(filePath: string, entries: Record<string, string>): Promise<vo
     zip.outputStream.on("error", reject);
     zip.outputStream.pipe(output);
   });
+}
+
+function modFile(fileName: string) {
+  return {
+    fileName,
+    source: "modrinth" as const,
+    downloadUrls: ["https://example.invalid/mod.jar"],
+    expectedHashes: {}
+  };
 }

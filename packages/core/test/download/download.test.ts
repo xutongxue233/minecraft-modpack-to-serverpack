@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { ModFileDescriptor } from "@mcsp/shared";
-import { calculateFileHash, downloadFileToCache, validateDownloadUrl, verifyFileHash } from "./download";
+import { calculateFileHash, downloadFileToCache, validateDownloadUrl, verifyFileHash } from "../../src/download/download";
 
 describe("download safety", () => {
   it("accepts HTTPS URLs and rejects unsafe protocols by default", () => {
@@ -84,6 +84,83 @@ describe("downloadFileToCache", () => {
 
     const files = await listFiles(cacheDir);
     expect(files).toEqual([]);
+  });
+
+  it("follows an https redirect and downloads the final target", async () => {
+    const cacheDir = await fs.mkdtemp(path.join(os.tmpdir(), "mcsp-download-redirect-"));
+    const payload = "redirected jar bytes";
+    const descriptor = modFile({
+      downloadUrls: ["https://example.invalid/start.jar"],
+      expectedHashes: { sha1: hash("sha1", payload) }
+    });
+    const fetchImpl: typeof fetch = async (input) => {
+      if (String(input) === "https://example.invalid/start.jar") {
+        return Response.redirect("https://cdn.invalid/final.jar", 302);
+      }
+      return new Response(payload, {
+        headers: { "content-length": String(Buffer.byteLength(payload)) }
+      });
+    };
+
+    const result = await downloadFileToCache(descriptor, { cacheDir, fetchImpl });
+
+    expect(result.fromCache).toBe(false);
+    await expect(fs.readFile(result.cachePath, "utf8")).resolves.toBe(payload);
+  });
+
+  it("rejects a redirect that downgrades to http", async () => {
+    const cacheDir = await fs.mkdtemp(path.join(os.tmpdir(), "mcsp-download-downgrade-"));
+    const descriptor = modFile({
+      downloadUrls: ["https://example.invalid/start.jar"]
+    });
+    const fetchImpl: typeof fetch = async () => Response.redirect("http://cdn.invalid/final.jar", 302);
+
+    await expect(downloadFileToCache(descriptor, { cacheDir, fetchImpl, retry: 0 })).rejects.toMatchObject({
+      code: "E_DOWNLOAD_FAILED"
+    });
+  });
+
+  it("tries alternate urls within one file-level retry budget", async () => {
+    const cacheDir = await fs.mkdtemp(path.join(os.tmpdir(), "mcsp-download-mirrors-"));
+    const descriptor = modFile({
+      downloadUrls: [
+        "https://mirror-a.invalid/mod.jar",
+        "https://mirror-b.invalid/mod.jar",
+        "https://mirror-c.invalid/mod.jar"
+      ]
+    });
+    const calls: string[] = [];
+    const retryEvents: Array<{ attempt: number; maxAttempts: number; url: string }> = [];
+    const fetchImpl: typeof fetch = async (input) => {
+      const url = String(input);
+      calls.push(url);
+      if (url === "https://mirror-c.invalid/mod.jar") {
+        return new Response("downloaded jar bytes");
+      }
+      return new Response("mirror unavailable", { status: 503 });
+    };
+
+    const result = await downloadFileToCache(descriptor, {
+      cacheDir,
+      fetchImpl,
+      retry: 2,
+      onProgress: (event) => {
+        if (event.type === "retry") {
+          retryEvents.push({ attempt: event.attempt, maxAttempts: event.maxAttempts, url: event.url });
+        }
+      }
+    });
+
+    expect(result.url).toBe("https://mirror-c.invalid/mod.jar");
+    expect(calls).toEqual([
+      "https://mirror-a.invalid/mod.jar",
+      "https://mirror-b.invalid/mod.jar",
+      "https://mirror-c.invalid/mod.jar"
+    ]);
+    expect(retryEvents).toEqual([
+      { attempt: 1, maxAttempts: 3, url: "https://mirror-a.invalid/mod.jar" },
+      { attempt: 2, maxAttempts: 3, url: "https://mirror-b.invalid/mod.jar" }
+    ]);
   });
 });
 

@@ -1,0 +1,92 @@
+name: Conversion or server startup failure
+description: Report a modpack conversion, serverpack generation, or generated startup script failure.
+title: "[Conversion]: "
+labels: ["conversion", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This template is for failures such as missing downloads, wrong Mod filtering, generated serverpack crashes, or start scripts not reaching `Done`.
+        Do not upload CurseForge API keys, tokens, private paths, or unredacted reports.
+  - type: input
+    id: app-version
+    attributes:
+      label: App version
+      placeholder: v0.1.0-alpha.3
+    validations:
+      required: true
+  - type: input
+    id: pack-name
+    attributes:
+      label: Modpack name and version
+      placeholder: TerraFirmaFarHorizons v1.3.1
+    validations:
+      required: true
+  - type: dropdown
+    id: pack-format
+    attributes:
+      label: Modpack format
+      options:
+        - CurseForge zip
+        - Modrinth mrpack
+        - packwiz directory
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: mc-loader
+    attributes:
+      label: Minecraft version and loader
+      placeholder: Minecraft 1.20.1, Forge 47.4.10
+    validations:
+      required: true
+  - type: dropdown
+    id: failure-stage
+    attributes:
+      label: Failure stage
+      options:
+        - Import or manifest parsing
+        - Metadata enrichment
+        - Mod download
+        - Server core download or install
+        - Serverpack generation
+        - Startup script test
+        - Generated server startup
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: symptoms
+    attributes:
+      label: What failed?
+      placeholder: The generated server stops after...
+    validations:
+      required: true
+  - type: textarea
+    id: report
+    attributes:
+      label: Redacted conversion report or relevant excerpt
+      description: Attach or paste `conversion-report.json` after removing local private paths and secrets.
+      render: json
+  - type: textarea
+    id: latest-log
+    attributes:
+      label: Server latest.log tail
+      description: Paste the final 100-200 lines from `logs/latest.log` if startup failed.
+      render: text
+  - type: textarea
+    id: suspected-mods
+    attributes:
+      label: Suspected client-only or incompatible Mods
+      description: Optional. List Mods you think should have been excluded or included.
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I removed API keys, tokens, server addresses, and private user data.
+          required: true
+        - label: I included the Minecraft version, loader, and modpack version.
+          required: true
+        - label: I checked whether the latest release already fixes this issue.
+          required: true
